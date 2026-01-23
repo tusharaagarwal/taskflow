@@ -1,0 +1,20 @@
+{
+  "database_host": "localhost",
+  "database_port": 5432,
+  "database_name": "workflow_orchestrator",
+  "database_user": "postgres",
+  "database_password": "user",
+  "secret_key": "5f6ba3612c89d21f08986a0a4d2b38529d82782c3fcee8c6251ba9df3c1126b8",
+  "debug": true,
+  "jwt_algorithm": "HS256",
+  "expire_minutes": 20,
+  "environment": "dev",
+  "cors_origins": [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080"
+  ]
+}

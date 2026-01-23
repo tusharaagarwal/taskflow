@@ -1,0 +1,14 @@
+{
+  "region": "YOUR_AWS_REGION",
+  "account_id": "YOUR_AWS_ACCOUNT_ID",
+  "resources": {
+    "sns_topic": "YOUR_SNS_TOPIC_NAME",
+    "sqs_queue": "YOUR_SQS_QUEUE_NAME"
+  },
+  "credentials": {
+    "access_key_id": "YOUR_AWS_ACCESS_KEY_ID",
+    "secret_access_key": "YOUR_AWS_SECRET_ACCESS_KEY",
+    "session_token": "YOUR_AWS_SESSION_TOKEN",
+    "note": "AWS credentials - Update with actual values from AWS console"
+  }
+}

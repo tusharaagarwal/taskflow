@@ -1,0 +1,12 @@
+{
+  "database_host": "localhost",
+  "database_port": 5432,
+  "database_name": "content_authoring_db",
+  "database_user": "content_authoring_user",
+  "database_password": "content_authoring_password",
+  "secret_key": "5f6ba3612c89d21f08986a0a4d2b38529d82782c3fcee8c6251ba9df3c1126b8",
+  "debug": true,
+  "jwt_algorithm": "HS256",
+  "expire_minutes": 20,
+  "environment": "pre_prod"
+}
