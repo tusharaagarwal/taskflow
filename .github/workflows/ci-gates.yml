@@ -6,6 +6,7 @@ on:
       - develop
       - qa
       - main
+      - feature/cicd
     paths:
       - 'server/**'
       - '.github/workflows/**'
@@ -25,6 +26,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       docker: ${{ steps.filter.outputs.docker }}
+      cicd: ${{ steps.filter.outputs.cicd }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,14 +41,15 @@ jobs:
               - '!server/Dockerfile*'
             docker:
               - '**/Dockerfile*'
-
+            cicd:
+              - '.github/workflows/**'
   # ============================================
   # BACKEND CI GATES
   # ============================================
   backend-gates:
     name: Backend CI Gates
     needs: detect-changes
-    if: needs.detect-changes.outputs.backend == 'true'
+    if: needs.detect-changes.outputs.backend == 'true' or needs.detect-changes.outputs.cicd == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
