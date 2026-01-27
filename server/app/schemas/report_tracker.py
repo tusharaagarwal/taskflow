@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, root_validator
+from typing import Optional, Literal, Any, Dict
 from datetime import datetime, timezone
 from uuid import UUID
 import uuid
@@ -167,41 +167,107 @@ class ReportTrackerCreateRequest(BaseModel):
 
 class ReportTrackerUpdateRequest(BaseModel):
     """
-    Request schema for updating workflow progress.
+    Request schema for updating workflow progress or step app_data.
     
-    Supports 8 action types:
-    - Forward actions (move to success_goto): accept, submit, approve
-    - Backward actions (move to fail_goto): reject, push_back, pull_back
-    - Special actions (no-op, TBD): publish, raise_exemption
+    This endpoint supports three use cases:
+    1. Perform workflow action only (move forward/backward)
+    2. Update step app_data only (no workflow state change)
+    3. Both: perform action AND update app_data
+    
+    At least one of 'action' or 'app_data' must be provided.
     
     Attributes:
-        action: Workflow action type
-        path: Optional path for dynamic transition resolution (e.g., 'exemption/errc/approved')
-              Used to navigate nested transition objects when success_goto or fail_goto
-              contains conditional paths instead of a simple string.
+        action: Optional workflow action type (forward/backward/special)
+        path: Optional path for dynamic transition resolution
+        instance_id: Optional UUID to target a specific step (otherwise targets current in-progress step)
+        app_data: Optional flexible dictionary to replace the step's app_data
     """
-    action: Literal[
+    action: Optional[Literal[
         "accept", "submit", "approve",  # Forward actions
         "reject", "push_back", "pull_back",  # Backward actions
         "publish", "raise_exemption"  # Special actions (TBD)
-    ] = Field(
-        ...,
-        description="Action to perform: forward actions (accept/submit/approve), backward actions (reject/push_back/pull_back), or special actions (publish/raise_exemption - TBD)",
-        example="accept"
+    ]] = Field(
+        None,
+        description="Workflow action to perform. Forward actions (accept/submit/approve) move to next step. "
+                    "Backward actions (reject/push_back/pull_back) move to previous step. "
+                    "Optional if only updating app_data."
     )
     path: Optional[str] = Field(
         None,
         description="Path for dynamic transition resolution (e.g., 'exemption/errc/approved'). "
-                    "Used when transitions have nested conditional paths instead of simple string values.",
-        example="exemption/errc/approved"
+                    "Used when transitions have nested conditional paths instead of simple string values."
     )
+    instance_id: Optional[str] = Field(
+        None,
+        description="UUID of specific step instance to update. "
+                    "If not provided, targets the current in-progress/retry step. "
+                    "Use this to update app_data of any step in the progress tracker."
+    )
+    app_data: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Flexible dictionary to replace the step's app_data. "
+                    "Consumer applications fully control the content structure. "
+                    "This completely replaces the existing app_data of the target step."
+    )
+    
+    @root_validator
+    def validate_at_least_one_field(cls, values):
+        """Ensure at least one of 'action' or 'app_data' is provided."""
+        action = values.get('action')
+        app_data = values.get('app_data')
+        if action is None and app_data is None:
+            raise ValueError("At least one of 'action' or 'app_data' must be provided")
+        return values
     
     class Config:
         json_schema_extra = {
-            "example": {
-                "action": "accept",
-                "path": "exemption/errc/approved"
-            }
+            "examples": [
+                {
+                    "summary": "Action only - Accept current step",
+                    "value": {
+                        "action": "accept"
+                    }
+                },
+                {
+                    "summary": "Action with path - Accept with dynamic transition",
+                    "value": {
+                        "action": "accept",
+                        "path": "exemption/errc/approved"
+                    }
+                },
+                {
+                    "summary": "App_data only - Update current step",
+                    "value": {
+                        "app_data": {
+                            "assignee": [
+                                {"user_id": "user-123", "name": "John Doe", "email": "john@example.com"}
+                            ],
+                            "custom_field": "any value",
+                            "metadata": {"source": "crm_app"}
+                        }
+                    }
+                },
+                {
+                    "summary": "Update specific step by instance_id",
+                    "value": {
+                        "instance_id": "550e8400-e29b-41d4-a716-446655440000",
+                        "app_data": {
+                            "reviewed": True,
+                            "review_notes": "Looks good"
+                        }
+                    }
+                },
+                {
+                    "summary": "Action + app_data - Submit and update",
+                    "value": {
+                        "action": "submit",
+                        "app_data": {
+                            "submitted_by": "jane@example.com",
+                            "submission_notes": "Ready for review"
+                        }
+                    }
+                }
+            ]
         }
 
 
@@ -215,6 +281,23 @@ class ReportTrackerStatusResponse(BaseModel):
     """
     report_id: str
     progress_tracker: list
+
+    class Config:
+        from_attributes = True
+
+
+class ReportTrackerWorkflowResponse(BaseModel):
+    """
+    Response schema for workflow definition queries.
+    
+    Returns the workflow JSON definition for a report tracker.
+    
+    Attributes:
+        report_id: Unique identifier for the report
+        workflow_json: Complete workflow definition with steps and transitions
+    """
+    report_id: str
+    workflow_json: Optional[dict] = None
 
     class Config:
         from_attributes = True

@@ -377,6 +377,47 @@ class TestReportTracker:
         assert "progress_tracker" in data
 
     @pytest.mark.asyncio
+    async def test_get_report_status_with_include_audit_param(self, client, sample_report_tracker):
+        """Test status endpoint accepts include_audit query parameter."""
+        # Test with include_audit=true
+        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=true")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "progress_tracker" in data
+        
+        # Test with include_audit=false
+        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=false")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "progress_tracker" in data
+
+    @pytest.mark.asyncio
+    async def test_get_report_workflow(self, client, sample_report_tracker):
+        """Test getting workflow JSON for a report tracker."""
+        # Get workflow
+        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/workflow")
+        
+        # Assertions
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
+        assert "workflow_json" in data
+        assert data["workflow_json"] is not None
+        assert "steps" in data["workflow_json"]
+        assert len(data["workflow_json"]["steps"]) > 0
+    
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_report_workflow(self, client, db):
+        """Test getting workflow for a non-existent report."""
+        response = client.get("/report-tracker/nonexistent-report-id/workflow")
+        
+        # Should return 404 Not Found
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        data = response.json()
+        assert "detail" in data
+        assert "not found" in data["detail"].lower()
+
+    @pytest.mark.asyncio
     async def test_list_report_trackers(self, client, db):
         # First ensure we have content products
         await _create_test_content_products(db)
@@ -736,3 +777,279 @@ class TestWorkflowActions:
         
         # Should return 422 validation error
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+class TestAppDataUpdate:
+    """Tests for app_data update functionality."""
+    
+    @pytest.mark.asyncio
+    async def test_update_app_data_only_current_step(self, client, db):
+        """Test updating app_data without action (updates current in-progress step)."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-app-data-only",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Update only app_data (no action)
+        update_data = {
+            "app_data": {
+                "assignee": [{"user_id": "user-123", "name": "John Doe"}],
+                "custom_field": "custom_value",
+                "metadata": {"source": "test_app"}
+            }
+        }
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        # Verify app_data was updated on the current step
+        progress_tracker = data["workflow_steps_json"]["progress_tracker"]
+        current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
+        assert current_step["app_data"]["assignee"][0]["user_id"] == "user-123"
+        assert current_step["app_data"]["custom_field"] == "custom_value"
+        assert current_step["app_data"]["metadata"]["source"] == "test_app"
+    
+    @pytest.mark.asyncio
+    async def test_update_app_data_with_instance_id(self, client, db):
+        """Test updating app_data for a specific step using instance_id."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-instance-id-update",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Get the instance_id of the first step
+        get_response = client.get(f"/report-tracker/{report_id}/status")
+        progress_tracker = get_response.json()["progress_tracker"]
+        first_step_instance_id = progress_tracker[0]["instance_id"]
+        
+        # Update app_data using instance_id
+        update_data = {
+            "instance_id": first_step_instance_id,
+            "app_data": {
+                "reviewed": True,
+                "review_notes": "Looks good"
+            }
+        }
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        # Verify app_data was updated on the specified step
+        progress_tracker = data["workflow_steps_json"]["progress_tracker"]
+        target_step = next(s for s in progress_tracker if s["instance_id"] == first_step_instance_id)
+        assert target_step["app_data"]["reviewed"] == True
+        assert target_step["app_data"]["review_notes"] == "Looks good"
+    
+    @pytest.mark.asyncio
+    async def test_update_action_and_app_data_combined(self, client, db):
+        """Test updating both action and app_data in a single request."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-combined-update",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Get the instance_id of the first step before action
+        get_response = client.get(f"/report-tracker/{report_id}/status")
+        progress_tracker = get_response.json()["progress_tracker"]
+        first_step_instance_id = progress_tracker[0]["instance_id"]
+        
+        # Update with action AND app_data
+        update_data = {
+            "action": "accept",
+            "app_data": {
+                "submitted_by": "jane@example.com",
+                "submission_notes": "Ready for review"
+            }
+        }
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        
+        # Verify the first step was completed (action worked)
+        progress_tracker = data["workflow_steps_json"]["progress_tracker"]
+        first_step = next(s for s in progress_tracker if s["instance_id"] == first_step_instance_id)
+        assert first_step["status"] == "completed"
+        
+        # Verify app_data was updated on that step
+        assert first_step["app_data"]["submitted_by"] == "jane@example.com"
+        assert first_step["app_data"]["submission_notes"] == "Ready for review"
+    
+    @pytest.mark.asyncio
+    async def test_update_empty_request_fails(self, client, db):
+        """Test that empty request body (no action, no app_data) returns 422."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-empty-request",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Try empty update
+        update_data = {}
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should return 422 validation error
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    
+    @pytest.mark.asyncio
+    async def test_update_invalid_instance_id_fails(self, client, db):
+        """Test that invalid instance_id returns 422."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-invalid-instance",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Try update with invalid instance_id
+        update_data = {
+            "instance_id": "non-existent-instance-id",
+            "app_data": {"some": "data"}
+        }
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should return 422 error
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert "not found" in response.json()["detail"].lower()
+    
+    @pytest.mark.asyncio
+    async def test_update_app_data_replaces_existing(self, client, db):
+        """Test that app_data update completely replaces existing app_data."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-replace-app-data",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # First update with some app_data
+        update_data1 = {
+            "app_data": {
+                "field1": "value1",
+                "field2": "value2"
+            }
+        }
+        response1 = client.put(f"/report-tracker/{report_id}", json=update_data1)
+        assert response1.status_code == status.HTTP_200_OK
+        
+        # Second update with different app_data (should replace, not merge)
+        update_data2 = {
+            "app_data": {
+                "field3": "value3"
+            }
+        }
+        response2 = client.put(f"/report-tracker/{report_id}", json=update_data2)
+        assert response2.status_code == status.HTTP_200_OK
+        
+        # Verify app_data was replaced (not merged)
+        progress_tracker = response2.json()["workflow_steps_json"]["progress_tracker"]
+        current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
+        
+        # Should only have field3, not field1 or field2
+        assert "field3" in current_step["app_data"]
+        assert current_step["app_data"]["field3"] == "value3"
+        assert "field1" not in current_step["app_data"]
+        assert "field2" not in current_step["app_data"]
+    
+    @pytest.mark.asyncio
+    async def test_update_app_data_flexible_structure(self, client, db):
+        """Test that app_data accepts any flexible structure."""
+        await _create_test_content_products(db)
+        
+        # Create a report
+        report_data = {
+            "report_id": "PR-flexible-app-data",
+            "content_product_name": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB
+        }
+        create_response = client.post("/report-tracker/", json=report_data)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        
+        # Update with complex nested app_data
+        update_data = {
+            "app_data": {
+                "assignee": [
+                    {"user_id": "u1", "name": "John", "email": "john@example.com"},
+                    {"user_id": "u2", "name": "Jane", "role": "reviewer"}
+                ],
+                "metadata": {
+                    "source": "crm_app",
+                    "version": "2.0",
+                    "nested": {
+                        "level1": {
+                            "level2": "deep_value"
+                        }
+                    }
+                },
+                "tags": ["urgent", "priority"],
+                "count": 42,
+                "active": True,
+                "nullable_field": None
+            }
+        }
+        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+        
+        # Verify the complex structure was stored correctly
+        progress_tracker = response.json()["workflow_steps_json"]["progress_tracker"]
+        current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
+        app_data = current_step["app_data"]
+        
+        assert len(app_data["assignee"]) == 2
+        assert app_data["metadata"]["nested"]["level1"]["level2"] == "deep_value"
+        assert app_data["tags"] == ["urgent", "priority"]
+        assert app_data["count"] == 42
+        assert app_data["active"] == True
+        assert app_data["nullable_field"] is None

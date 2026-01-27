@@ -834,26 +834,28 @@ class ReportTrackerService:
     @staticmethod
     async def update(db: AsyncSession, report_id: str, update_data) -> Optional[ReportTracker]:
         """
-        Update a report tracker with workflow action.
+        Update a report tracker with workflow action and/or app_data.
+        
+        This method supports three use cases:
+        1. Perform workflow action only (move forward/backward)
+        2. Update step app_data only (no workflow state change)
+        3. Both: perform action AND update app_data
         
         Supports 8 action types:
         - Forward actions (move to success_goto): accept, submit, approve
         - Backward actions (move to fail_goto): reject, push_back, pull_back
         - Special actions (no-op, TBD): publish, raise_exemption
         
-        Automatically identifies the current active step and applies the requested action.
-        If no step is in progress, activates the first 'yet_to_start' step.
-        
         Args:
             db: Async database session
             report_id: Unique identifier for the report
-            update_data: Request containing action (one of 8 supported types)
+            update_data: Request containing optional action, instance_id, and/or app_data
             
         Returns:
             Updated ReportTracker instance, or None if not found
             
         Raises:
-            UnprocessableEntityException: If action cannot be performed or workflow is complete
+            UnprocessableEntityException: If action cannot be performed, step not found, or workflow is complete
         """
         from app.exceptions import UnprocessableEntityException
         
@@ -870,71 +872,99 @@ class ReportTrackerService:
         steps = tracker.workflow_steps_json["progress_tracker"]
         workflow_json = tracker.workflow_json or {}
         
-        current_step = None
-        for step in steps:
-            if step.get("status") in ["in_progress", "retry"]:
-                current_step = step
-                break
-        
-        if not current_step and WorkflowActionType.is_forward_action(update_data.action):
-            if ReportTrackerService._are_all_steps_completed(steps, workflow_json):
-                raise UnprocessableEntityException(
-                    detail="All workflow steps are already completed. Cannot restart the workflow."
-                )
-            
-            if len(steps) > 0:
-                for step in steps:
-                    if step.get("status") == "yet_to_start":
-                        step["status"] = "in_progress"
-                        step["started_at"] = datetime.now(timezone.utc).isoformat()
-                        current_step = step
-                        break
-                
-                if not current_step:
-                    raise UnprocessableEntityException(
-                        detail="No step available to start"
-                    )
-            else:
-                raise UnprocessableEntityException(detail="No workflow steps found")
-        
-        if not current_step:
-            raise UnprocessableEntityException(detail="No step in progress or retry state found")
-            
-        current_step_id = current_step.get("step_id")
-        current_step_json = ReportTrackerService._find_step_in_workflow_json(workflow_json, current_step_id)
-        
-        if not current_step_json:
-            raise UnprocessableEntityException(detail=f"Step JSON not found for step_id {current_step_id}")
-        
-        # Validate that the requested action is available for this step
-        action_available = current_step.get("action_available", [])
-        if action_available and update_data.action not in action_available:
-            raise UnprocessableEntityException(
-                detail=f"Action '{update_data.action}' is not allowed for step '{current_step_id}'. "
-                       f"Available actions: {', '.join(action_available)}"
-            )
-        
-        # Get the optional path from update_data (for dynamic transition resolution)
+        # Get optional fields from update_data
+        action = getattr(update_data, "action", None)
+        instance_id = getattr(update_data, "instance_id", None)
+        app_data = getattr(update_data, "app_data", None)
         transition_path = getattr(update_data, "path", None)
         
-        # Handle special actions (no-op for now)
-        if WorkflowActionType.is_special_action(update_data.action):
-            # TBD: Implementation to be discussed
-            # For now, these actions don't change workflow state
-            # Just return the tracker without modifications
-            logger.info(f"Special action '{update_data.action}' executed (no-op) for step '{current_step_id}'")
-            return tracker
-             
-        if WorkflowActionType.is_forward_action(update_data.action):
-            ReportTrackerService._accept(
-                tracker, steps, current_step, current_step_json, workflow_json, transition_path
-            )
-        elif WorkflowActionType.is_backward_action(update_data.action):
-            ReportTrackerService._reject(
-                tracker, steps, current_step, current_step_json, workflow_json, transition_path
-            )
+        # Find target step based on instance_id or current in-progress step
+        target_step = None
+        
+        if instance_id:
+            # Find step by instance_id
+            for step in steps:
+                if step.get("instance_id") == instance_id:
+                    target_step = step
+                    break
+            
+            if not target_step:
+                raise UnprocessableEntityException(
+                    detail=f"Step with instance_id '{instance_id}' not found in progress tracker"
+                )
         else:
-            raise UnprocessableEntityException(detail=f"Invalid action: {update_data.action}")
+            # Find current in-progress/retry step
+            for step in steps:
+                if step.get("status") in ["in_progress", "retry"]:
+                    target_step = step
+                    break
+        
+        # If action is provided, we need a valid target step for workflow operations
+        if action:
+            if not target_step and WorkflowActionType.is_forward_action(action):
+                if ReportTrackerService._are_all_steps_completed(steps, workflow_json):
+                    raise UnprocessableEntityException(
+                        detail="All workflow steps are already completed. Cannot restart the workflow."
+                    )
+                
+                if len(steps) > 0:
+                    for step in steps:
+                        if step.get("status") == "yet_to_start":
+                            step["status"] = "in_progress"
+                            step["started_at"] = datetime.now(timezone.utc).isoformat()
+                            target_step = step
+                            break
+                    
+                    if not target_step:
+                        raise UnprocessableEntityException(
+                            detail="No step available to start"
+                        )
+                else:
+                    raise UnprocessableEntityException(detail="No workflow steps found")
+            
+            if not target_step:
+                raise UnprocessableEntityException(detail="No step in progress or retry state found")
+        
+        # If only app_data is provided (no action), we still need a target step
+        if not action and app_data is not None:
+            if not target_step:
+                raise UnprocessableEntityException(
+                    detail="No step in progress or retry state found. Provide instance_id to target a specific step."
+                )
+        
+        # Update app_data if provided
+        if app_data is not None and target_step:
+            target_step["app_data"] = app_data
+        
+        # Perform workflow action if provided
+        if action and target_step:
+            target_step_id = target_step.get("step_id")
+            target_step_json = ReportTrackerService._find_step_in_workflow_json(workflow_json, target_step_id)
+            
+            if not target_step_json:
+                raise UnprocessableEntityException(detail=f"Step JSON not found for step_id {target_step_id}")
+            
+            # Validate that the requested action is available for this step
+            action_available = target_step.get("action_available", [])
+            if action_available and action not in action_available:
+                raise UnprocessableEntityException(
+                    detail=f"Action '{action}' is not allowed for step '{target_step_id}'. "
+                           f"Available actions: {', '.join(action_available)}"
+                )
+            
+            # Handle special actions (no-op for now)
+            if WorkflowActionType.is_special_action(action):
+                logger.info(f"Special action '{action}' executed (no-op) for step '{target_step_id}'")
+            elif WorkflowActionType.is_forward_action(action):
+                ReportTrackerService._accept(
+                    tracker, steps, target_step, target_step_json, workflow_json, transition_path
+                )
+            elif WorkflowActionType.is_backward_action(action):
+                ReportTrackerService._reject(
+                    tracker, steps, target_step, target_step_json, workflow_json, transition_path
+                )
+            else:
+                raise UnprocessableEntityException(detail=f"Invalid action: {action}")
             
         tracker.workflow_steps_json = {"progress_tracker": steps}
         flag_modified(tracker, "workflow_steps_json")
@@ -972,13 +1002,14 @@ class ReportTrackerService:
         ]
 
     @staticmethod
-    async def get_status(db: AsyncSession, report_id: str) -> Optional[Dict[str, Any]]:
+    async def get_status(db: AsyncSession, report_id: str, include_audit: bool = True) -> Optional[Dict[str, Any]]:
         """
         Get the current workflow status for a specific report.
         
         Args:
             db: Async database session
             report_id: Unique identifier for the report
+            include_audit: Reserved for future use - will control audit field visibility
             
         Returns:
             Dictionary with report_id and progress_tracker, or None if not found
