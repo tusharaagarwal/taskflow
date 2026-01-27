@@ -907,11 +907,20 @@ class ReportTrackerService:
             raise UnprocessableEntityException(detail=f"Step JSON not found for step_id {current_step_id}")
         
         # Validate that the requested action is available for this step
-        action_available = current_step.get("action_available", [])
-        if action_available and update_data.action not in action_available:
+        # Get action_available from the workflow JSON definition (source of truth)
+        action_available = current_step_json.get("action_available", [])
+        
+        # If action_available list is defined and not empty, validate the action
+        if action_available:
+            if update_data.action not in action_available:
+                raise UnprocessableEntityException(
+                    detail=f"Action '{update_data.action}' is not allowed for step '{current_step_id}'. "
+                           f"Available actions: {', '.join(action_available)}"
+                )
+        # If action_available is empty list, no actions are allowed
+        elif action_available == []:
             raise UnprocessableEntityException(
-                detail=f"Action '{update_data.action}' is not allowed for step '{current_step_id}'. "
-                       f"Available actions: {', '.join(action_available)}"
+                detail=f"No actions are allowed for step '{current_step_id}'. This step does not accept any actions."
             )
         
         # Get the optional path from update_data (for dynamic transition resolution)
