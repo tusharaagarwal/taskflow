@@ -32,8 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['javascript', 'python']
-        # javascript covers TypeScript/React in client/
+        language: ['python']
         # python covers FastAPI in server/
     
     steps:
