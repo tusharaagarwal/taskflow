@@ -1,0 +1,242 @@
+name: PR Comment Report
+
+on:
+  workflow_run:
+    workflows: ["CI Gates"]
+    types:
+      - completed
+
+permissions:
+  pull-requests: write
+  actions: read
+  contents: read
+
+jobs:
+  comment:
+    name: Post CI-Gates Report
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+
+    steps:
+      - name: Download PR number
+        uses: actions/github-script@v7
+        id: get-pr
+        with:
+          script: |
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+
+            // Try to find PR from artifacts or commit
+            const prNumber = context.payload.workflow_run.pull_requests[0]?.number;
+
+            if (prNumber) {
+              core.setOutput('pr_number', prNumber);
+              return prNumber;
+            }
+
+            // Fallback: find PR by head branch
+            const branch = context.payload.workflow_run.head_branch;
+            const pulls = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branch}`
+            });
+
+            if (pulls.data.length > 0) {
+              core.setOutput('pr_number', pulls.data[0].number);
+              return pulls.data[0].number;
+            }
+
+            core.setOutput('pr_number', '');
+            return null;
+
+      - name: Get workflow jobs
+        if: steps.get-pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        id: get-jobs
+        with:
+          script: |
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+
+            const jobStatuses = {
+              frontend: 'skipped',
+              backend: 'skipped',
+              docker: 'skipped',
+              hasMigrations: false
+            };
+
+            for (const job of jobs.data.jobs) {
+              if (job.name.includes('Frontend CI Gates')) {
+                jobStatuses.frontend = job.conclusion || job.status;
+              } else if (job.name.includes('Backend CI Gates')) {
+                jobStatuses.backend = job.conclusion || job.status;
+              } else if (job.name.includes('Docker Build')) {
+                jobStatuses.docker = job.conclusion || job.status;
+              } else if (job.name.includes('Migration')) {
+                jobStatuses.hasMigrations = true;
+              }
+            }
+
+            return jobStatuses;
+
+      - name: Post PR comment
+        if: steps.get-pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.get-pr.outputs.pr_number }};
+            const workflowRun = context.payload.workflow_run;
+            const conclusion = workflowRun.conclusion;
+            const runUrl = workflowRun.html_url;
+            const commitSha = workflowRun.head_sha.substring(0, 7);
+            const jobStatuses = ${{ steps.get-jobs.outputs.result }};
+
+            // Status emoji and text
+            const statusEmoji = conclusion === 'success' ? '✅' :
+                               conclusion === 'failure' ? '❌' :
+                               conclusion === 'cancelled' ? '⚠️' : '🔄';
+            const statusText = conclusion === 'success' ? 'PASSED' :
+                              conclusion === 'failure' ? 'FAILED' :
+                              conclusion === 'cancelled' ? 'CANCELLED' : 'IN PROGRESS';
+
+            // Component status helper
+            const getStatusEmoji = (status) => {
+              if (status === 'success') return '✅';
+              if (status === 'failure') return '❌';
+              if (status === 'skipped') return '⏭️';
+              if (status === 'cancelled') return '⚠️';
+              return '🔄';
+            };
+
+            const getStatusText = (status) => {
+              if (status === 'success') return 'Passed';
+              if (status === 'failure') return 'Failed';
+              if (status === 'skipped') return 'Skipped';
+              if (status === 'cancelled') return 'Cancelled';
+              return 'Running';
+            };
+
+            // Build summary table
+            const summaryTable = `
+            | Component | Status | Details |
+            |-----------|--------|---------|
+            | Frontend Gates | ${getStatusEmoji(jobStatuses.frontend)} ${getStatusText(jobStatuses.frontend)} | Lint, Test, Coverage, Build |
+            | Backend Gates | ${getStatusEmoji(jobStatuses.backend)} ${getStatusText(jobStatuses.backend)} | Lint, Test, Coverage |
+            | Docker Build | ${getStatusEmoji(jobStatuses.docker)} ${getStatusText(jobStatuses.docker)} | Dockerfile validation |
+            `;
+
+            // Migration info
+            const migrationInfo = jobStatuses.hasMigrations ?
+              '\n**🗄️ Database Migrations:** Detected in this PR' : '';
+
+            // Build comment
+            const comment = `
+            ## ${statusEmoji} CI-Gates Report
+
+            **Status:** ${statusText}
+            **Workflow Run:** [View Details](${runUrl})
+            **Commit:** \`${commitSha}\`
+            ${migrationInfo}
+
+            ### 📋 Summary
+            ${summaryTable}
+
+            ### 📊 Coverage & Quality
+
+            ${conclusion === 'failure' ? `
+            **⚠️ Issues Detected:**
+            - Check workflow logs for detailed error messages
+            - Review failing tests and linting errors
+            - Ensure coverage meets 65% threshold
+            ` : `
+            **✅ All Quality Gates Passed!**
+            - All tests passing
+            - Coverage meets requirements
+            - Build successful
+            `}
+
+            ---
+
+            ### 🎯 Early Development Phase
+
+            ${conclusion === 'failure' ? `
+            **This PR can still be merged** despite CI failures:
+            - ✅ Requires 1 approval from reviewer
+            - ℹ️ CI-Gates failures are expected while team fixes code quality
+            - 🎯 Reviewers should focus on: architecture, approach, logic
+            - 📝 CI issues will be addressed in follow-up PRs
+
+            **Common Issues (Being Fixed):**
+            - Linting errors (run \`npm run lint:fix\` in client/)
+            - Test failures (being addressed by dev team)
+            - Coverage below 65% (adding tests incrementally)
+            ` : `
+            **✅ Ready for Review & Merge**
+            - All quality gates passed
+            - Safe to merge after approval
+            `}
+
+            ---
+
+            <details>
+            <summary>📚 CI-Gates Documentation</summary>
+
+            **What CI-Gates Checks:**
+            - **Frontend:** ESLint, Jest tests, 65% coverage, Webpack build
+            - **Backend:** Ruff linting, pytest, 65% coverage
+            - **Docker:** Validates all Dockerfiles build successfully
+            - **Security:** CodeQL and Secret Scanning (separate workflows)
+
+            **Deployment:**
+            - Deployments only run **after PR is merged**
+            - Backend deployments include automatic database migrations
+            - Zero-downtime deployments to ECS
+
+            **Need Help?**
+            - Check [\`.github/workflows/README.md\`](.github/workflows/README.md) for full documentation
+            - Ask in #devops-help channel
+            </details>
+
+            ---
+            <sub>🤖 Automated by CI-Gates • Commit ${commitSha} • [Workflow Run #${workflowRun.run_number}](${runUrl})</sub>
+            `;
+
+            // Find existing comment from this bot
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.data.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('CI-Gates Report')
+            );
+
+            // Update existing comment or create new one
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+              console.log('Updated existing PR comment');
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: comment
+              });
+              console.log('Created new PR comment');
+            }
+
