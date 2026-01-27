@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - qa
-      - feature/cicd-migration
+      - feature/cicd
     paths:
       - 'server/**'
       - '.github/workflows/backend-qa-deploy.yml'
