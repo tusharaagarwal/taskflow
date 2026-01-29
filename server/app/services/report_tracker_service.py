@@ -911,17 +911,14 @@ class ReportTrackerService:
         action_available = current_step_json.get("action_available", [])
         
         # If action_available list is defined and not empty, validate the action
-        if action_available:
+        # If action_available is empty list or missing, allow all configured actions (backward compatibility)
+        if action_available and len(action_available) > 0:
             if update_data.action not in action_available:
                 raise UnprocessableEntityException(
                     detail=f"Action '{update_data.action}' is not allowed for step '{current_step_id}'. "
                            f"Available actions: {', '.join(action_available)}"
                 )
-        # If action_available is empty list, no actions are allowed
-        elif action_available == []:
-            raise UnprocessableEntityException(
-                detail=f"No actions are allowed for step '{current_step_id}'. This step does not accept any actions."
-            )
+        # If action_available is empty list or missing, allow all actions (no validation needed)
         
         # Get the optional path from update_data (for dynamic transition resolution)
         transition_path = getattr(update_data, "path", None)
