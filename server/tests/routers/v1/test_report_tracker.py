@@ -894,8 +894,8 @@ class TestActionValidation:
         assert response.status_code == status.HTTP_200_OK
     
     @pytest.mark.asyncio
-    async def test_empty_action_available_rejects_all(self, client, db):
-        """Test that empty action_available list rejects all actions."""
+    async def test_empty_action_available_allows_all(self, client, db):
+        """Test that empty action_available list allows all actions (corrected behavior)."""
         await _create_test_content_products(db)
         
         # Create a workflow with empty action_available list
@@ -908,7 +908,7 @@ class TestActionValidation:
                     "actor": {},
                     "is_optional": False,
                     "sla": {},
-                    "action_available": [],  # No actions allowed
+                    "action_available": [],  # Empty list should allow all actions
                     "personas": [],
                     "transitions": {
                         "success_goto": "review",
@@ -945,15 +945,12 @@ class TestActionValidation:
         await db.commit()
         await db.refresh(tracker)
         
-        # Try any action
+        # Try any action - should be allowed
         update_data = {"action": "accept"}
         response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
         
-        # Should return 422 with message about no actions allowed
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        data = response.json()
-        assert "detail" in data
-        assert "no actions" in data["detail"].lower() or "not accept any actions" in data["detail"].lower()
+        # Should return 200 (success) since empty action_available allows all actions
+        assert response.status_code == status.HTTP_200_OK
     
     @pytest.mark.asyncio
     async def test_validation_uses_workflow_json_not_progress_tracker(self, client, db):
