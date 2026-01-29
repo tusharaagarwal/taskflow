@@ -46,7 +46,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve"],
             "personas": [],
             "transitions": {
                 "success_goto": "review",
@@ -60,7 +60,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
             "personas": [],
             "transitions": {
                 "success_goto": "approval",
@@ -74,7 +74,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
             "personas": [],
             "transitions": {
                 "success_goto": "publish",
@@ -736,3 +736,288 @@ class TestWorkflowActions:
         
         # Should return 422 validation error
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+class TestActionValidation:
+    """Tests for action validation against workflow JSON action_available."""
+    
+    @pytest.mark.asyncio
+    async def test_action_not_in_available_list(self, client, db):
+        """Test that action not in action_available list is rejected."""
+        await _create_test_content_products(db)
+        
+        # Create a workflow with specific action_available list
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["submit", "approve"],  # Only submit and approve allowed
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["approve", "reject"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "publish",
+                        "fail_goto": "draft"
+                    }
+                },
+                {
+                    "step_id": "publish",
+                    "step_name": "Publish",
+                    "stage_name": "Published",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+        
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        tracker = ReportTracker(
+            report_id="PR-action-validation",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        
+        # Try to use "accept" action which is not in action_available
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        
+        # Should return 422 with clear error message
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        data = response.json()
+        assert "detail" in data
+        assert "not allowed" in data["detail"].lower()
+        assert "accept" in data["detail"]
+        assert "submit" in data["detail"]  # Should mention available actions
+        assert "approve" in data["detail"]
+    
+    @pytest.mark.asyncio
+    async def test_action_in_available_list_succeeds(self, client, db):
+        """Test that action in action_available list is allowed."""
+        await _create_test_content_products(db)
+        
+        # Create a workflow with specific action_available list
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["accept", "submit", "approve"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["approve", "reject"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "publish",
+                        "fail_goto": "draft"
+                    }
+                },
+                {
+                    "step_id": "publish",
+                    "step_name": "Publish",
+                    "stage_name": "Published",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+        
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        tracker = ReportTracker(
+            report_id="PR-action-allowed",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        
+        # Use "accept" action which IS in action_available
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+    
+    @pytest.mark.asyncio
+    async def test_empty_action_available_allows_all(self, client, db):
+        """Test that empty action_available list allows all actions (corrected behavior)."""
+        await _create_test_content_products(db)
+        
+        # Create a workflow with empty action_available list
+        workflow_no_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],  # Empty list should allow all actions
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+        
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_no_actions)
+        tracker = ReportTracker(
+            report_id="PR-no-actions",
+            workflow_json=workflow_no_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        
+        # Try any action - should be allowed
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        
+        # Should return 200 (success) since empty action_available allows all actions
+        assert response.status_code == status.HTTP_200_OK
+    
+    @pytest.mark.asyncio
+    async def test_validation_uses_workflow_json_not_progress_tracker(self, client, db):
+        """Test that validation uses workflow_json as source of truth, not progress_tracker."""
+        await _create_test_content_products(db)
+        
+        # Create a workflow with specific actions
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["submit"],  # Only submit in workflow JSON
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+        
+        # Create workflow_steps with DIFFERENT action_available (to test source of truth)
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        # Manually modify progress_tracker to have different actions (simulating data inconsistency)
+        if workflow_steps.get("progress_tracker"):
+            workflow_steps["progress_tracker"][0]["action_available"] = ["accept", "approve"]
+        
+        tracker = ReportTracker(
+            report_id="PR-source-of-truth",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        
+        # Try "accept" which is in progress_tracker but NOT in workflow_json
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        
+        # Should fail because workflow_json is the source of truth
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        
+        # Try "submit" which IS in workflow_json
+        update_data = {"action": "submit"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
