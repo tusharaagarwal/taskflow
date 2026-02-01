@@ -46,7 +46,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve"],
             "personas": [],
             "transitions": {
                 "success_goto": "review",
@@ -60,7 +60,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
             "personas": [],
             "transitions": {
                 "success_goto": "approval",
@@ -74,7 +74,7 @@ SAMPLE_WORKFLOW = {
             "actor": {},
             "is_optional": False,
             "sla": {},
-            "action_available": [],
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
             "personas": [],
             "transitions": {
                 "success_goto": "publish",
@@ -384,7 +384,7 @@ class TestReportTracker:
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "progress_tracker" in data
-        
+
         # Test with include_audit=false
         response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=false")
         assert response.status_code == status.HTTP_200_OK
@@ -396,7 +396,7 @@ class TestReportTracker:
         """Test getting workflow JSON for a report tracker."""
         # Get workflow
         response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/workflow")
-        
+
         # Assertions
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
@@ -405,12 +405,12 @@ class TestReportTracker:
         assert data["workflow_json"] is not None
         assert "steps" in data["workflow_json"]
         assert len(data["workflow_json"]["steps"]) > 0
-    
+
     @pytest.mark.asyncio
     async def test_get_nonexistent_report_workflow(self, client, db):
         """Test getting workflow for a non-existent report."""
         response = client.get("/report-tracker/nonexistent-report-id/workflow")
-        
+
         # Should return 404 Not Found
         assert response.status_code == status.HTTP_404_NOT_FOUND
         data = response.json()
@@ -781,12 +781,12 @@ class TestWorkflowActions:
 
 class TestAppDataUpdate:
     """Tests for app_data update functionality."""
-    
+
     @pytest.mark.asyncio
     async def test_update_app_data_only_current_step(self, client, db):
         """Test updating app_data without action (updates current in-progress step)."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-app-data-only",
@@ -797,7 +797,7 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Update only app_data (no action)
         update_data = {
             "app_data": {
@@ -807,23 +807,23 @@ class TestAppDataUpdate:
             }
         }
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        
+
         # Verify app_data was updated on the current step
         progress_tracker = data["workflow_steps_json"]["progress_tracker"]
         current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
         assert current_step["app_data"]["assignee"][0]["user_id"] == "user-123"
         assert current_step["app_data"]["custom_field"] == "custom_value"
         assert current_step["app_data"]["metadata"]["source"] == "test_app"
-    
+
     @pytest.mark.asyncio
     async def test_update_app_data_with_instance_id(self, client, db):
         """Test updating app_data for a specific step using instance_id."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-instance-id-update",
@@ -834,12 +834,12 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Get the instance_id of the first step
         get_response = client.get(f"/report-tracker/{report_id}/status")
         progress_tracker = get_response.json()["progress_tracker"]
         first_step_instance_id = progress_tracker[0]["instance_id"]
-        
+
         # Update app_data using instance_id
         update_data = {
             "instance_id": first_step_instance_id,
@@ -849,22 +849,22 @@ class TestAppDataUpdate:
             }
         }
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        
+
         # Verify app_data was updated on the specified step
         progress_tracker = data["workflow_steps_json"]["progress_tracker"]
         target_step = next(s for s in progress_tracker if s["instance_id"] == first_step_instance_id)
         assert target_step["app_data"]["reviewed"] == True
         assert target_step["app_data"]["review_notes"] == "Looks good"
-    
+
     @pytest.mark.asyncio
     async def test_update_action_and_app_data_combined(self, client, db):
         """Test updating both action and app_data in a single request."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-combined-update",
@@ -875,12 +875,12 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Get the instance_id of the first step before action
         get_response = client.get(f"/report-tracker/{report_id}/status")
         progress_tracker = get_response.json()["progress_tracker"]
         first_step_instance_id = progress_tracker[0]["instance_id"]
-        
+
         # Update with action AND app_data
         update_data = {
             "action": "accept",
@@ -890,25 +890,25 @@ class TestAppDataUpdate:
             }
         }
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        
+
         # Verify the first step was completed (action worked)
         progress_tracker = data["workflow_steps_json"]["progress_tracker"]
         first_step = next(s for s in progress_tracker if s["instance_id"] == first_step_instance_id)
         assert first_step["status"] == "completed"
-        
+
         # Verify app_data was updated on that step
         assert first_step["app_data"]["submitted_by"] == "jane@example.com"
         assert first_step["app_data"]["submission_notes"] == "Ready for review"
-    
+
     @pytest.mark.asyncio
     async def test_update_empty_request_fails(self, client, db):
         """Test that empty request body (no action, no app_data) returns 422."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-empty-request",
@@ -919,19 +919,19 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Try empty update
         update_data = {}
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should return 422 validation error
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    
+
     @pytest.mark.asyncio
     async def test_update_invalid_instance_id_fails(self, client, db):
         """Test that invalid instance_id returns 422."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-invalid-instance",
@@ -942,23 +942,23 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Try update with invalid instance_id
         update_data = {
             "instance_id": "non-existent-instance-id",
             "app_data": {"some": "data"}
         }
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should return 422 error
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "not found" in response.json()["detail"].lower()
-    
+
     @pytest.mark.asyncio
     async def test_update_app_data_replaces_existing(self, client, db):
         """Test that app_data update completely replaces existing app_data."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-replace-app-data",
@@ -969,7 +969,7 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # First update with some app_data
         update_data1 = {
             "app_data": {
@@ -979,7 +979,7 @@ class TestAppDataUpdate:
         }
         response1 = client.put(f"/report-tracker/{report_id}", json=update_data1)
         assert response1.status_code == status.HTTP_200_OK
-        
+
         # Second update with different app_data (should replace, not merge)
         update_data2 = {
             "app_data": {
@@ -988,22 +988,22 @@ class TestAppDataUpdate:
         }
         response2 = client.put(f"/report-tracker/{report_id}", json=update_data2)
         assert response2.status_code == status.HTTP_200_OK
-        
+
         # Verify app_data was replaced (not merged)
         progress_tracker = response2.json()["workflow_steps_json"]["progress_tracker"]
         current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
-        
+
         # Should only have field3, not field1 or field2
         assert "field3" in current_step["app_data"]
         assert current_step["app_data"]["field3"] == "value3"
         assert "field1" not in current_step["app_data"]
         assert "field2" not in current_step["app_data"]
-    
+
     @pytest.mark.asyncio
     async def test_update_app_data_flexible_structure(self, client, db):
         """Test that app_data accepts any flexible structure."""
         await _create_test_content_products(db)
-        
+
         # Create a report
         report_data = {
             "report_id": "PR-flexible-app-data",
@@ -1014,7 +1014,7 @@ class TestAppDataUpdate:
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
-        
+
         # Update with complex nested app_data
         update_data = {
             "app_data": {
@@ -1038,18 +1038,303 @@ class TestAppDataUpdate:
             }
         }
         response = client.put(f"/report-tracker/{report_id}", json=update_data)
-        
+
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
-        
+
         # Verify the complex structure was stored correctly
         progress_tracker = response.json()["workflow_steps_json"]["progress_tracker"]
         current_step = next(s for s in progress_tracker if s["status"] == "in_progress")
         app_data = current_step["app_data"]
-        
+
         assert len(app_data["assignee"]) == 2
         assert app_data["metadata"]["nested"]["level1"]["level2"] == "deep_value"
         assert app_data["tags"] == ["urgent", "priority"]
         assert app_data["count"] == 42
         assert app_data["active"] == True
         assert app_data["nullable_field"] is None
+
+
+class TestActionValidation:
+    """Tests for action validation against workflow JSON action_available."""
+
+    @pytest.mark.asyncio
+    async def test_action_not_in_available_list(self, client, db):
+        """Test that action not in action_available list is rejected."""
+        await _create_test_content_products(db)
+
+        # Create a workflow with specific action_available list
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["submit", "approve"],  # Only submit and approve allowed
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["approve", "reject"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "publish",
+                        "fail_goto": "draft"
+                    }
+                },
+                {
+                    "step_id": "publish",
+                    "step_name": "Publish",
+                    "stage_name": "Published",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        tracker = ReportTracker(
+            report_id="PR-action-validation",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        # Try to use "accept" action which is not in action_available
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+
+        # Should return 422 with clear error message
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        data = response.json()
+        assert "detail" in data
+        assert "not allowed" in data["detail"].lower()
+        assert "accept" in data["detail"]
+        assert "submit" in data["detail"]  # Should mention available actions
+        assert "approve" in data["detail"]
+
+    @pytest.mark.asyncio
+    async def test_action_in_available_list_succeeds(self, client, db):
+        """Test that action in action_available list is allowed."""
+        await _create_test_content_products(db)
+
+        # Create a workflow with specific action_available list
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["accept", "submit", "approve"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["approve", "reject"],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "publish",
+                        "fail_goto": "draft"
+                    }
+                },
+                {
+                    "step_id": "publish",
+                    "step_name": "Publish",
+                    "stage_name": "Published",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        tracker = ReportTracker(
+            report_id="PR-action-allowed",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        # Use "accept" action which IS in action_available
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.asyncio
+    async def test_empty_action_available_allows_all(self, client, db):
+        """Test that empty action_available list allows all actions (corrected behavior)."""
+        await _create_test_content_products(db)
+
+        # Create a workflow with empty action_available list
+        workflow_no_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],  # Empty list should allow all actions
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+
+        # Create report tracker directly in DB with custom workflow
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_no_actions)
+        tracker = ReportTracker(
+            report_id="PR-no-actions",
+            workflow_json=workflow_no_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        # Try any action - should be allowed
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+
+        # Should return 200 (success) since empty action_available allows all actions
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.asyncio
+    async def test_validation_uses_workflow_json_not_progress_tracker(self, client, db):
+        """Test that validation uses workflow_json as source of truth, not progress_tracker."""
+        await _create_test_content_products(db)
+
+        # Create a workflow with specific actions
+        workflow_with_actions = {
+            "steps": [
+                {
+                    "step_id": "draft",
+                    "step_name": "Initial Draft",
+                    "stage_name": "Authoring",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": ["submit"],  # Only submit in workflow JSON
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "review",
+                        "fail_goto": "NA"
+                    }
+                },
+                {
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                    "action_available": [],
+                    "personas": [],
+                    "transitions": {
+                        "success_goto": "NA",
+                        "fail_goto": "NA"
+                    }
+                }
+            ]
+        }
+
+        # Create workflow_steps with DIFFERENT action_available (to test source of truth)
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(workflow_with_actions)
+        # Manually modify progress_tracker to have different actions (simulating data inconsistency)
+        if workflow_steps.get("progress_tracker"):
+            workflow_steps["progress_tracker"][0]["action_available"] = ["accept", "approve"]
+
+        tracker = ReportTracker(
+            report_id="PR-source-of-truth",
+            workflow_json=workflow_with_actions,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        # Try "accept" which is in progress_tracker but NOT in workflow_json
+        update_data = {"action": "accept"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+
+        # Should fail because workflow_json is the source of truth
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+        # Try "submit" which IS in workflow_json
+        update_data = {"action": "submit"}
+        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+
+        # Should succeed
+        assert response.status_code == status.HTTP_200_OK
