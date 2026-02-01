@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, root_validator, model_validator
 from typing import Optional, Literal, Any, Dict
 from datetime import datetime, timezone
 from uuid import UUID
@@ -210,14 +210,12 @@ class ReportTrackerUpdateRequest(BaseModel):
                     "This completely replaces the existing app_data of the target step."
     )
     
-    @root_validator
-    def validate_at_least_one_field(cls, values):
+    @model_validator(mode='after')
+    def validate_at_least_one_field(self):
         """Ensure at least one of 'action' or 'app_data' is provided."""
-        action = values.get('action')
-        app_data = values.get('app_data')
-        if action is None and app_data is None:
+        if self.action is None and self.app_data is None:
             raise ValueError("At least one of 'action' or 'app_data' must be provided")
-        return values
+        return self
     
     class Config:
         json_schema_extra = {
