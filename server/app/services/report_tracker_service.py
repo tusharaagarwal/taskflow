@@ -945,12 +945,18 @@ class ReportTrackerService:
                 raise UnprocessableEntityException(detail=f"Step JSON not found for step_id {target_step_id}")
             
             # Validate that the requested action is available for this step
-            action_available = target_step.get("action_available", [])
-            if action_available and action not in action_available:
-                raise UnprocessableEntityException(
-                    detail=f"Action '{action}' is not allowed for step '{target_step_id}'. "
-                           f"Available actions: {', '.join(action_available)}"
-                )
+            # Get action_available from the workflow JSON definition (source of truth)
+            action_available = target_step_json.get("action_available", [])
+            
+            # If action_available list is defined and not empty, validate the action
+            # If action_available is empty list or missing, allow all configured actions (backward compatibility)
+            if action_available and len(action_available) > 0:
+                if action not in action_available:
+                    raise UnprocessableEntityException(
+                        detail=f"Action '{action}' is not allowed for step '{target_step_id}'. "
+                               f"Available actions: {', '.join(action_available)}"
+                    )
+            # If action_available is empty list or missing, allow all actions (no validation needed)
             
             # Handle special actions (no-op for now)
             if WorkflowActionType.is_special_action(action):
