@@ -9,7 +9,8 @@ from app.schemas.report_tracker import (
     ReportTrackerCreateRequest, 
     ReportTrackerListResponse,
     ReportTrackerUpdateRequest,
-    AssignUserToStepRequest
+    AssignUserToStepRequest,
+    ReportTrackerWorkflowResponse
 )
 from app.services.report_tracker_service import ReportTrackerService
 from app.exceptions import UnprocessableEntityException
@@ -70,19 +71,38 @@ async def update_report_tracker(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Update report tracker with workflow action.
+    Update report tracker workflow state and/or step app_data.
     
-    Supports 7 action types:
-    - Forward actions (move to success_goto): accept, submit, approve
-    - Backward actions (move to fail_goto): reject, push_back, pull_back
+    This endpoint supports three use cases:
     
-    Forward actions:
-    - Mark current step as completed
-    - Move to the next step as in_progress
+    **1. Workflow Action Only** - Move workflow forward or backward:
+    ```json
+    {"action": "accept"}
+    ```
     
-    Backward actions:
-    - Mark current step as rejected
-    - Move back to previous step or create retry based on fail_goto
+    **2. Update App_Data Only** - Update current step's app_data without changing workflow state:
+    ```json
+    {"app_data": {"assignee": [{"user_id": "123", "name": "John"}], "custom_field": "value"}}
+    ```
+    
+    **3. Update Specific Step by Instance ID** - Target any step using its instance_id:
+    ```json
+    {"instance_id": "550e8400-e29b-41d4-a716-446655440000", "app_data": {"reviewed": true}}
+    ```
+    
+    **4. Combined Action + App_Data** - Perform action AND update app_data:
+    ```json
+    {"action": "submit", "app_data": {"notes": "Ready for review"}}
+    ```
+    
+    **Actions:**
+    - Forward (move to success_goto): accept, submit, approve
+    - Backward (move to fail_goto): reject, push_back, pull_back
+    - Special (TBD): publish, raise_exemption
+    
+    **Validation:**
+    - At least one of 'action' or 'app_data' must be provided
+    - If instance_id provided, step must exist in progress tracker
     """
     try:
         tracker = await ReportTrackerService.update(db, report_id, update_data)
@@ -124,13 +144,22 @@ async def update_report_tracker(
 @router.get("/{report_id}/status", response_model=ReportTrackerStatusResponse)
 async def get_report_status(
     report_id: str,
+    include_audit: bool = True,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get report status by report_id.
     Returns progress_tracker with existing and future steps following the happy path.
+    
+    **Query Parameters:**
+    - `include_audit` (bool, default: true): Controls whether audit data 
+      (started_at, completed_at) is included in the response.
+    
+    **Example requests:**
+    - `GET /report-tracker/PR-123/status` - Full response with audit data
+    - `GET /report-tracker/PR-123/status?include_audit=false` - Response without audit fields
     """
-    status_data = await ReportTrackerService.get_status(db, report_id)
+    status_data = await ReportTrackerService.get_status(db, report_id, include_audit=include_audit)
     
     if not status_data:
         raise HTTPException(
@@ -139,6 +168,31 @@ async def get_report_status(
         )
     
     return status_data
+
+
+@router.get("/{report_id}/workflow", response_model=ReportTrackerWorkflowResponse)
+async def get_report_workflow(
+    report_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get workflow definition by report_id.
+    
+    Returns the complete workflow JSON definition including all steps and their transitions.
+    This is the original workflow template associated with the report tracker.
+    """
+    tracker = await ReportTrackerService.get_by_report_id(db, report_id)
+    
+    if not tracker:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report tracker with report_id '{report_id}' not found"
+        )
+    
+    return ReportTrackerWorkflowResponse(
+        report_id=tracker.report_id,
+        workflow_json=tracker.workflow_json
+    )
 
 
 @router.get("/{report_id}", response_model=ReportTrackerResponse)
