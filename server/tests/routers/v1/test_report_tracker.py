@@ -166,7 +166,7 @@ def mock_cpm_and_workflow(monkeypatch):
     monkeypatch.setattr(ReportTrackerService, "_generate_unique_report_id", mock_generate_id)
 
 # This event_loop fixture is required for async tests
-@pytest.fixture(scope="session")
+@pytest.fixture
 def event_loop():
     policy = asyncio.WindowsSelectorEventLoopPolicy()
     loop = policy.new_event_loop()

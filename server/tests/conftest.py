@@ -51,14 +51,14 @@ SAMPLE_REPORT_TRACKERS = [
     }
 ]
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def event_loop():
     """Create an instance of the default event loop for each test case."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def engine():
     """Create a test database engine with SQLite in-memory."""
     engine = create_async_engine(
@@ -90,17 +90,21 @@ def app():
 @pytest.fixture
 async def db(engine):
     """Create a test database session."""
-    async with engine.begin() as conn:
+    async with engine.connect() as conn:
         # Start a transaction
-        await conn.begin()
-        # Create a session
+        transaction = await conn.begin()
+        
+        # Create a session bound to the connection
         async_session = sessionmaker(
-            engine, expire_on_commit=False, class_=AsyncSession
+            bind=conn, expire_on_commit=False, class_=AsyncSession
         )
         async with async_session() as session:
             yield session
-            # Rollback the transaction after the test
+            # Rollback the session-level transaction (if any left)
             await session.rollback()
+        
+        # Rollback the connection-level transaction
+        await transaction.rollback()
 
 @pytest.fixture
 def client(db):
