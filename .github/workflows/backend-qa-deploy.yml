@@ -18,8 +18,7 @@ env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: prism/orchestrator/backend
   ENVIRONMENT: qa
-  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_QA_ACCOUNT_ID }}:role/prism-github-actions-role
-  ECS_CLUSTER: prism-qa-ecs-cluster
+  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_QA_ACCOUNT_ID }}:role/github-cicd-role  ECS_CLUSTER: prism-qa-ecs-cluster
   ECS_SERVICE: prism-qa-orchestrator-backend
   CONTAINER_NAME: orchestrator-backend
 
