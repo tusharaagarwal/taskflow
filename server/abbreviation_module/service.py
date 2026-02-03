@@ -11,7 +11,7 @@ Provides:
 import logging
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from abbreviation_module.cache import TTLCache
@@ -35,11 +35,11 @@ class AbbreviationService:
         service = AbbreviationService()
         
         # Get abbreviation (uses cache, falls back to database)
-        abbr = await service.get_abbreviation(db, "ANNUAL")  # Returns "ANN"
+        abbr = await service.get_abbreviation(db, "Credit Opinion")  # Returns "CO"
         
         # Invalidate cache after database updates
         service.invalidate_cache()  # Clear all
-        service.invalidate_cache(document_type="ANNUAL")  # Clear specific
+        service.invalidate_cache(document_type="Credit Opinion")  # Clear specific
     """
     
     def __init__(self, config: Optional[AbbreviationConfig] = None):
@@ -70,16 +70,16 @@ class AbbreviationService:
         
         Args:
             db: Async database session.
-            document_type: The document type to look up (e.g., "ANNUAL").
+            document_type: The document type to look up (e.g., "Credit Opinion").
             
         Returns:
-            The abbreviation string (e.g., "ANN").
+            The abbreviation string (e.g., "CO").
             
         Raises:
             AbbreviationNotFoundError: If abbreviation not found and raise_on_not_found is True.
         """
-        # Normalize document type (uppercase, trimmed)
-        normalized_type = document_type.strip().upper()
+        # Normalize document type (lowercase, trimmed)
+        normalized_type = document_type.strip().lower()
         cache_key = f"abbr:{normalized_type}"
         
         # Try cache first
@@ -127,7 +127,7 @@ class AbbreviationService:
         """
         result = await db.execute(
             select(DocumentTypeAbbreviation.abbreviation)
-            .where(DocumentTypeAbbreviation.document_type == document_type)
+            .where(func.lower(DocumentTypeAbbreviation.document_type) == document_type)
             .where(DocumentTypeAbbreviation.is_active == True)
         )
         row = result.scalar_one_or_none()
@@ -209,14 +209,14 @@ class AbbreviationService:
             service.invalidate_cache()
             
             # Clear specific document type (after single update)
-            service.invalidate_cache(document_type="ANNUAL")
+            service.invalidate_cache(document_type="Credit Opinion")
         """
         if document_type is None:
             count = self._cache.invalidate()
             logger.info(f"Invalidated entire abbreviation cache ({count} entries)")
             return count
         else:
-            normalized_type = document_type.strip().upper()
+            normalized_type = document_type.strip().lower()
             cache_key = f"abbr:{normalized_type}"
             count = self._cache.invalidate(cache_key)
             if count > 0:

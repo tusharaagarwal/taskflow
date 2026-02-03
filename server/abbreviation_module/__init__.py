@@ -11,11 +11,11 @@ Usage:
     service = AbbreviationService()
     
     # Get abbreviation (with caching)
-    abbreviation = await service.get_abbreviation(db, "ANNUAL")  # Returns "ANN"
+    abbreviation = await service.get_abbreviation(db, "Credit Opinion")  # Returns "CO"
     
     # Invalidate cache after database updates
     service.invalidate_cache()  # Clear all
-    service.invalidate_cache(document_type="ANNUAL")  # Clear specific
+    service.invalidate_cache(document_type="Credit Opinion")  # Clear specific
 """
 
 from abbreviation_module.config import AbbreviationConfig

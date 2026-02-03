@@ -10,6 +10,10 @@ class ReportTracker(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     report_id = Column(String, unique=True, index=True)
+    transaction_id = Column(String, nullable=True, index=True)
+    pr_id = Column(String, nullable=True, index=True)
+    cpm_id = Column(String, nullable=True)
+    action_code = Column(String, nullable=True)
     workflow_json = Column(JSON, nullable=True)
     workflow_steps_json = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

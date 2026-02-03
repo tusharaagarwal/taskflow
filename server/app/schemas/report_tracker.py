@@ -36,23 +36,32 @@ class ReportTrackerCreateRequest(BaseModel):
     Request schema for creating a new report tracker.
     
     Attributes:
-        report_id: Unique identifier for the report
-        content_product_name: Name of the content product defining the workflow
+        transaction_id: Transaction identifier
+        pr_id: PR identifier
+        content_type: Type of content (replaces content_product_name)
         lob: Line of Business
         sub_lob: Sub Line of Business
+        document_type: Document type for auto-generating report ID (e.g., "ANNUAL" -> "ANN-100001")
+        action_code: Action code (stored as-is)
     """
-    report_id: str = Field(..., example="PR-123", description="Unique identifier for the report")
-    content_product_name: str = Field(..., example="Credit Opinion", description="Name of the content product")
+    transaction_id: str = Field(..., example="TXN-12345", description="Transaction identifier")
+    pr_id: str = Field(..., example="PR-67890", description="PR identifier")
+    content_type: str = Field(..., example="Credit Opinion", description="Type of content product")
     lob: str = Field(..., example="banking", description="Line of Business")
     sub_lob: str = Field(..., example="figbanking", description="Sub Line of Business")
+    document_type: str = Field(..., example="Credit Opinion", description="Document type for auto-generating report ID")
+    action_code: str = Field(..., example="APPROVED", description="Action code")
 
     class Config:
         json_schema_extra = {
             "example": {
-                "report_id": "PR-123",
-                "content_product_name": "Credit Opinion",
+                "transaction_id": "TXN-12345",
+                "pr_id": "PR-67890",
+                "content_type": "Credit Opinion",
                 "lob": "banking",
-                "sub_lob": "figbanking"
+                "sub_lob": "figbanking",
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED"
             }
         }
 
@@ -386,7 +395,11 @@ class ReportTrackerResponse(BaseModel):
     
     Attributes:
         id: Database primary key
-        report_id: Unique identifier for the report
+        report_id: Auto-generated unique identifier for the report
+        transaction_id: Transaction identifier
+        pr_id: PR identifier
+        cpm_id: CPM record ID
+        action_code: Action code
         workflow_json: Complete workflow definition
         workflow_steps_json: Current state of all workflow steps
         created_at: Timestamp of tracker creation
@@ -394,6 +407,10 @@ class ReportTrackerResponse(BaseModel):
     """
     id: UUID
     report_id: str
+    transaction_id: Optional[str] = None
+    pr_id: Optional[str] = None
+    cpm_id: Optional[str] = None
+    action_code: Optional[str] = None
     workflow_json: Optional[dict] = None
     workflow_steps_json: Optional[dict] = None
     created_at: datetime
