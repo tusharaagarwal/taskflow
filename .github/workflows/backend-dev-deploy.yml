@@ -18,7 +18,7 @@ env:
   AWS_REGION: ap-south-1
   ECR_REPOSITORY: prism/orchestrator/backend
   ENVIRONMENT: dev
-  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_DEV_ACCOUNT_ID }}:role/prism-github-actions-role
+  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_DEV_ACCOUNT_ID }}:role/github-cicd-role
   ECS_CLUSTER: prism-dev-ecs-cluster
   ECS_SERVICE: prism-dev-orchestrator-backend
   CONTAINER_NAME: orchestrator-backend
