@@ -55,7 +55,10 @@ class ReportTrackerService:
         # Get CPM record from mock or real API
         from app.services.cpm_client_service import CPMClientService
         
-        print(f"[DEBUG] Fetching CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, cp_name={create_data.content_product_name}")
+        logger.debug(
+            "Fetching CPM record for lob=%s, sub_lob=%s, cp_name=%s",
+            create_data.lob, create_data.sub_lob, create_data.content_product_name,
+        )
         cpm_record = await CPMClientService.get_cpm_by_filters(
             lob=create_data.lob,
             sub_lob=create_data.sub_lob,
@@ -65,16 +68,16 @@ class ReportTrackerService:
         # Extract workflow_id (UUID string) from CPM record
         workflow_id = cpm_record.get("workflow_id")
         if not workflow_id:
-            print(f"[ERROR] No workflow_id in CPM record")
+            logger.error("No workflow_id in CPM record")
             raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, cp_name={create_data.content_product_name}")
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService
-        print(f"[DEBUG] Getting workflow JSON for workflow_id: {workflow_id}")
+        logger.debug("Getting workflow JSON for workflow_id: %s", workflow_id)
         workflow_json = await WorkflowService.get_workflow_json_from_workflow(db, workflow_id)
         
         if not workflow_json:
-            print(f"[ERROR] Workflow not found for workflow_id: {workflow_id}")
+            logger.error("Workflow not found for workflow_id: %s", workflow_id)
             raise ValueError(f"Workflow not found for workflow_id '{workflow_id}'")
         
         # Ensure workflow_json is a dictionary
@@ -82,7 +85,7 @@ class ReportTrackerService:
             try:
                 workflow_json = json.loads(workflow_json)
             except json.JSONDecodeError:
-                print(f"[ERROR] Invalid workflow JSON format: {workflow_json}")
+                logger.error("Invalid workflow JSON format: %s", workflow_json)
                 workflow_json = {}
         
         # Create the tracker with default empty workflow_steps_json
@@ -607,6 +610,14 @@ class ReportTrackerService:
                 break
         
         if next_step_index is not None:
+            for idx in range(current_step_index + 1, next_step_index):
+                skipped_step = steps[idx]
+                skipped_step_json = ReportTrackerService._find_step_in_workflow_json(
+                    workflow_json, skipped_step.get("step_id")
+                )
+                if skipped_step_json and skipped_step_json.get("is_optional"):
+                    skipped_step["status"] = "skipped"
+                    skipped_step["completed_at"] = current_time
             next_step = steps[next_step_index]
             next_step["status"] = "in_progress"
             if not next_step.get("started_at"):
@@ -922,7 +933,9 @@ class ReportTrackerService:
         
         # Get the optional path from update_data (for dynamic transition resolution)
         transition_path = getattr(update_data, "path", None)
-        
+        previous_step_id = current_step_id
+        previous_step_name = current_step.get("step_name")
+
         # Handle special actions (no-op for now)
         if WorkflowActionType.is_special_action(update_data.action):
             # TBD: Implementation to be discussed
@@ -941,7 +954,7 @@ class ReportTrackerService:
             )
         else:
             raise UnprocessableEntityException(detail=f"Invalid action: {update_data.action}")
-            
+
         tracker.workflow_steps_json = {"progress_tracker": steps}
         flag_modified(tracker, "workflow_steps_json")
         await db.commit()
