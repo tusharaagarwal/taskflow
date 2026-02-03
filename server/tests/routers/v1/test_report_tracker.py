@@ -154,6 +154,17 @@ def mock_cpm_and_workflow(monkeypatch):
     monkeypatch.setattr(CPMClientService, "get_cpm_by_filters", mock_get_cpm_by_filters)
     monkeypatch.setattr(WorkflowService, "get_workflow_json_from_workflow", mock_get_workflow_json_from_workflow)
 
+    # Mock report ID generation to avoid Postgres sequence dependency in SQLite tests
+    from app.services.report_tracker_service import ReportTrackerService
+    async def mock_generate_id(db, document_type):
+        import uuid
+        # Return a deterministic ID for tests based on document_type but unique
+        prefix = "CO" if "Credit" in document_type else "RPT"
+        random_suffix = uuid.uuid4().hex[:6].upper()
+        return f"{prefix}-{random_suffix}"
+    
+    monkeypatch.setattr(ReportTrackerService, "_generate_unique_report_id", mock_generate_id)
+
 # This event_loop fixture is required for async tests
 @pytest.fixture(scope="session")
 def event_loop():
@@ -296,20 +307,27 @@ class TestReportTracker:
         await _create_test_content_products(db)
         
         # Test data
+        # Test data - Updated to new schema
         report_data = {
-            "report_id": "PR-12345",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-12345",
+            "pr_id": "PR-12345",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         
         # Make request
         response = client.post("/report-tracker/", json=report_data)
         
         # Assertions
+        if response.status_code != status.HTTP_201_CREATED:
+            print(f"\n[DEBUG] Create failed: {response.status_code} - {response.text}\n")
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
-        assert data["report_id"] == report_data["report_id"]
+        assert data["report_id"].startswith("CO-")  # Matches mocked ID format
+        assert data["transaction_id"] == "TXN-12345"
         assert "workflow_steps_json" in data
 
     @pytest.mark.asyncio
@@ -318,11 +336,15 @@ class TestReportTracker:
         await _create_test_content_products(db)
         
         # First create a report
+        # First create a report
         report_data = {
-            "report_id": "PR-67890",
-            "content_product_name": "Research Report",
+            "transaction_id": "TXN-67890",
+            "pr_id": "PR-67890",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -423,18 +445,47 @@ class TestReportTracker:
         await _create_test_content_products(db)
         
         # Create a couple of reports
+        # Create a couple of reports
         reports = [
-            {"report_id": "PR-11111", "content_product_name": "Credit Opinion", "lob": DEFAULT_LOB, "sub_lob": DEFAULT_SUB_LOB},
-            {"report_id": "PR-22222", "content_product_name": "Market Analysis", "lob": DEFAULT_LOB, "sub_lob": DEFAULT_SUB_LOB}
+            {
+                "transaction_id": "TXN-11111", 
+                "pr_id": "PR-11111", 
+                "content_type": "Credit Opinion", 
+                "lob": DEFAULT_LOB, 
+                "sub_lob": DEFAULT_SUB_LOB,
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED"
+            },
+            {
+                "transaction_id": "TXN-22222", 
+                "pr_id": "PR-22222", 
+                "content_type": "Credit Opinion", 
+                "lob": DEFAULT_LOB, 
+                "sub_lob": DEFAULT_SUB_LOB,
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED"
+            }
         ]
         
         # Store created report IDs for later verification
         created_report_ids = []
         
-        for report in reports:
-            response = client.post("/report-tracker/", json=report)
-            assert response.status_code == status.HTTP_201_CREATED
-            created_report_ids.append(response.json()["report_id"])
+        # Mock generator to return distinct IDs
+        from app.services.report_tracker_service import ReportTrackerService
+        original_mock = ReportTrackerService._generate_unique_report_id
+        
+        # Simple counter to ensure unique IDs
+        counter = 0
+        async def mock_seq_generator(db, dt):
+            nonlocal counter
+            counter += 1
+            return f"CO-{100000+counter}"
+            
+        with patch.object(ReportTrackerService, '_generate_unique_report_id', side_effect=mock_seq_generator):
+            for report in reports:
+                response = client.post("/report-tracker/", json=report)
+                assert response.status_code == status.HTTP_201_CREATED
+                created_report_ids.append(response.json()["report_id"])
         
         # List all reports
         response = client.get("/report-tracker/")
@@ -660,11 +711,15 @@ class TestWorkflowActions:
         await _create_test_content_products(db)
         
         # Create a report
+        # Create a report
         report_data = {
-            "report_id": f"PR-{action}-test",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": f"TXN-{action}",
+            "pr_id": f"PR-{action}-test",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -694,11 +749,15 @@ class TestWorkflowActions:
         
         for action in forward_actions:
             # Create a new report for each test
+            # Create a new report for each test
             report_data = {
-                "report_id": f"PR-forward-{action}",
-                "content_product_name": "Credit Opinion",
+                "transaction_id": f"TXN-fwd-{action}",
+                "pr_id": f"PR-forward-{action}",
+                "content_type": "Credit Opinion",
                 "lob": DEFAULT_LOB,
-                "sub_lob": DEFAULT_SUB_LOB
+                "sub_lob": DEFAULT_SUB_LOB,
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED"
             }
             create_response = client.post("/report-tracker/", json=report_data)
             report_id = create_response.json()["report_id"]
@@ -729,11 +788,15 @@ class TestWorkflowActions:
         
         for action in backward_actions:
             # Create a new report and move it forward first
+            # Create a new report and move it forward first
             report_data = {
-                "report_id": f"PR-backward-{action}",
-                "content_product_name": "Credit Opinion",
+                "transaction_id": f"TXN-back-{action}",
+                "pr_id": f"PR-backward-{action}",
+                "content_type": "Credit Opinion",
                 "lob": DEFAULT_LOB,
-                "sub_lob": DEFAULT_SUB_LOB
+                "sub_lob": DEFAULT_SUB_LOB,
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED"
             }
             create_response = client.post("/report-tracker/", json=report_data)
             report_id = create_response.json()["report_id"]
@@ -762,11 +825,15 @@ class TestWorkflowActions:
         await _create_test_content_products(db)
         
         # Create a report
+        # Create a report
         report_data = {
-            "report_id": "PR-invalid-action",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-invalid",
+            "pr_id": "PR-invalid-action",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         report_id = create_response.json()["report_id"]
@@ -788,11 +855,15 @@ class TestAppDataUpdate:
         await _create_test_content_products(db)
 
         # Create a report
+        # Create a report
         report_data = {
-            "report_id": "PR-app-data-only",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-app-data",
+            "pr_id": "PR-app-data-only",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -826,10 +897,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-instance-id-update",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-instance-id",
+            "pr_id": "PR-instance-id-update",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -867,10 +941,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-combined-update",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-combined",
+            "pr_id": "PR-combined-update",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -911,10 +988,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-empty-request",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-empty",
+            "pr_id": "PR-empty-request",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -934,10 +1014,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-invalid-instance",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-invalid",
+            "pr_id": "PR-invalid-instance",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -961,10 +1044,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-replace-app-data",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-replace",
+            "pr_id": "PR-replace-app-data",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
@@ -1006,10 +1092,13 @@ class TestAppDataUpdate:
 
         # Create a report
         report_data = {
-            "report_id": "PR-flexible-app-data",
-            "content_product_name": "Credit Opinion",
+            "transaction_id": "TXN-flexible",
+            "pr_id": "PR-flexible-app-data",
+            "content_type": "Credit Opinion",
             "lob": DEFAULT_LOB,
-            "sub_lob": DEFAULT_SUB_LOB
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED"
         }
         create_response = client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED

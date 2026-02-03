@@ -46,24 +46,14 @@ class ReportTrackerService:
         from app.exceptions import UnprocessableEntityException
         from sqlalchemy import text
         
-        # Generate report_id using abbreviation and sequence
         try:
-            from abbreviation_module import AbbreviationService
-            
-            abbreviation_service = AbbreviationService()
-            abbreviation = await abbreviation_service.get_abbreviation(db, create_data.document_type)
-            
-            # Get next sequence value from PostgreSQL
-            result = await db.execute(text("SELECT nextval('report_id_seq')"))
-            sequence_value = result.scalar()
-            
-            # Format: {ABBREVIATION}-{SEQUENCE}
-            report_id = f"{abbreviation}-{sequence_value}"
+            report_id = await ReportTrackerService._generate_unique_report_id(db, create_data.document_type)
             logger.info(f"Generated report_id '{report_id}' for document_type '{create_data.document_type}'")
-            
         except Exception as e:
             logger.error(f"Failed to generate report_id from document_type '{create_data.document_type}': {e}")
             raise ValueError(f"Failed to generate report_id: {e}")
+
+
         
         # Check if a report tracker with the same report_id already exists
         existing_tracker = await ReportTrackerService.get_by_report_id(db, report_id)
@@ -75,7 +65,7 @@ class ReportTrackerService:
         # Get CPM record from mock or real API using content_type as cp_name
         from app.services.cpm_client_service import CPMClientService
         
-        print(f"[DEBUG] Fetching CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
+        logger.debug(f"Fetching CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
         cpm_record = await CPMClientService.get_cpm_by_filters(
             lob=create_data.lob,
             sub_lob=create_data.sub_lob,
@@ -87,16 +77,16 @@ class ReportTrackerService:
         cpm_id = cpm_record.get("id") or cpm_record.get("cpm_id")  # Try both keys
         
         if not workflow_id:
-            print(f"[ERROR] No workflow_id in CPM record")
+            logger.error(f"No workflow_id in CPM record")
             raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService
-        print(f"[DEBUG] Getting workflow JSON for workflow_id: {workflow_id}")
+        logger.debug(f"Getting workflow JSON for workflow_id: {workflow_id}")
         workflow_json = await WorkflowService.get_workflow_json_from_workflow(db, workflow_id)
         
         if not workflow_json:
-            print(f"[ERROR] Workflow not found for workflow_id: {workflow_id}")
+            logger.error(f"Workflow not found for workflow_id: {workflow_id}")
             raise ValueError(f"Workflow not found for workflow_id '{workflow_id}'")
         
         # Ensure workflow_json is a dictionary
@@ -104,7 +94,7 @@ class ReportTrackerService:
             try:
                 workflow_json = json.loads(workflow_json)
             except json.JSONDecodeError:
-                print(f"[ERROR] Invalid workflow JSON format: {workflow_json}")
+                logger.error(f"Invalid workflow JSON format: {workflow_json}")
                 workflow_json = {}
         
         # Create the tracker with all new fields
@@ -125,6 +115,33 @@ class ReportTrackerService:
         return tracker
 
 
+
+    @staticmethod
+    async def _generate_unique_report_id(db: AsyncSession, document_type: str) -> str:
+        """
+        Generate a unique report ID using the abbreviation module and database sequence.
+        
+        Args:
+            db: Database session
+            document_type: Document type name
+            
+        Returns:
+            Formatted report ID strings (e.g. 'CO-100001')
+        """
+        from abbreviation_module import AbbreviationService
+        from sqlalchemy import text
+        
+        abbreviation_service = AbbreviationService()
+        abbreviation = await abbreviation_service.get_abbreviation(db, document_type)
+        
+        # Get next sequence value from PostgreSQL
+        # Note: This specific SQL is Postgres-only. 
+        # For testing with SQLite, this method should be mocked.
+        result = await db.execute(text("SELECT nextval('report_id_seq')"))
+        sequence_value = result.scalar()
+        
+        # Format: {ABBREVIATION}-{SEQUENCE}
+        return f"{abbreviation}-{sequence_value}"
 
     @staticmethod
     async def get_by_report_id(db: AsyncSession, report_id: str) -> Optional[ReportTracker]:
