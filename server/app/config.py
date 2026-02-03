@@ -126,7 +126,6 @@ if settings.environment == "production":
     settings.database_echo = False
     settings.rate_limit_enabled = True
     settings.cache_enabled = True
-    settings.email_enabled = True
 
 # Development-specific overrides
 if settings.environment == "development":
@@ -145,7 +144,6 @@ if settings.environment == "testing":
     settings.database_echo = False
     settings.rate_limit_enabled = False
     settings.cache_enabled = False
-    settings.email_enabled = False
 
 # Validation
 def validate_settings():
