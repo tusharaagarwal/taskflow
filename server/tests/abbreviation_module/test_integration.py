@@ -15,8 +15,8 @@ async def abbreviation_data(db):
     """Create test abbreviation data in the database."""
     abbreviations = [
         DocumentTypeAbbreviation(
-            document_type="ANNUAL",
-            abbreviation="ANN",
+            document_type="Credit Opinion",
+            abbreviation="CO",
             is_active=True,
         ),
         DocumentTypeAbbreviation(
@@ -75,7 +75,7 @@ class TestDocumentTypeAbbreviationModel:
         from sqlalchemy.exc import IntegrityError
         
         duplicate = DocumentTypeAbbreviation(
-            document_type="ANNUAL",  # Already exists
+            document_type="Credit Opinion",  # Already exists
             abbreviation="DUP",
             is_active=True,
         )
@@ -89,15 +89,15 @@ class TestDocumentTypeAbbreviationModel:
         """Test model to_dict conversion."""
         result = await db.execute(
             select(DocumentTypeAbbreviation).where(
-                DocumentTypeAbbreviation.document_type == "ANNUAL"
+                DocumentTypeAbbreviation.document_type == "Credit Opinion"
             )
         )
         abbr = result.scalar_one()
         
         data = abbr.to_dict()
         
-        assert data["document_type"] == "ANNUAL"
-        assert data["abbreviation"] == "ANN"
+        assert data["document_type"] == "Credit Opinion"
+        assert data["abbreviation"] == "CO"
         assert data["is_active"] is True
         assert "id" in data
         assert "created_at" in data
@@ -112,9 +112,9 @@ class TestAbbreviationServiceIntegration:
         service = AbbreviationService()
         service.invalidate_cache()  # Ensure cache is empty
         
-        result = await service.get_abbreviation(db, "ANNUAL")
+        result = await service.get_abbreviation(db, "Credit Opinion")
         
-        assert result == "ANN"
+        assert result == "CO"
     
     @pytest.mark.asyncio
     async def test_caching_behavior(self, db, abbreviation_data):
@@ -145,7 +145,7 @@ class TestAbbreviationServiceIntegration:
             await service.get_abbreviation(db, "INACTIVE")
     
     @pytest.mark.asyncio
-    async def test_get_all_abbreviations(self, db, abbreviation_data):
+    async def test_all_active_abbreviations(self, db, abbreviation_data):
         """Test getting all active abbreviations."""
         service = AbbreviationService()
         
@@ -153,7 +153,7 @@ class TestAbbreviationServiceIntegration:
         
         # Should not include inactive
         doc_types = [r["document_type"] for r in result]
-        assert "ANNUAL" in doc_types
+        assert "Credit Opinion" in doc_types
         assert "TAX" in doc_types
         assert "INACTIVE" not in doc_types
     
@@ -174,25 +174,25 @@ class TestAbbreviationServiceIntegration:
         service.invalidate_cache()
         
         # Fetch and cache
-        result1 = await service.get_abbreviation(db, "ANNUAL")
-        assert result1 == "ANN"
+        result1 = await service.get_abbreviation(db, "Credit Opinion")
+        assert result1 == "CO"
         
         # Update database directly
         await db.execute(
-            text("UPDATE document_type_abbreviations SET abbreviation = 'ANL' WHERE document_type = 'ANNUAL'")
+            text("UPDATE document_type_abbreviations SET abbreviation = 'CO-UPD' WHERE document_type = 'Credit Opinion'")
         )
         await db.commit()
         
         # Should still return cached value
-        result2 = await service.get_abbreviation(db, "ANNUAL")
-        assert result2 == "ANN"
+        result2 = await service.get_abbreviation(db, "Credit Opinion")
+        assert result2 == "CO"
         
         # Invalidate cache
-        service.invalidate_cache(document_type="ANNUAL")
+        service.invalidate_cache(document_type="Credit Opinion")
         
         # Should now return new value
-        result3 = await service.get_abbreviation(db, "ANNUAL")
-        assert result3 == "ANL"
+        result3 = await service.get_abbreviation(db, "Credit Opinion")
+        assert result3 == "CO-UPD"
 
 
 class TestReportIdSequence:

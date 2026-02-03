@@ -17,8 +17,8 @@ class DocumentTypeAbbreviation(Base):
     
     Attributes:
         id: Unique identifier (UUID).
-        document_type: Full document type name (e.g., "ANNUAL", "TAX").
-        abbreviation: Short abbreviation (e.g., "ANN", "TAX").
+        document_type: Full document type name (e.g., "Credit Opinion", "TAX").
+        abbreviation: Short abbreviation (e.g., "CO", "TAX").
         is_active: Whether this abbreviation is active.
         created_at: Timestamp when record was created.
         updated_at: Timestamp when record was last updated.
@@ -38,13 +38,13 @@ class DocumentTypeAbbreviation(Base):
         unique=True,
         nullable=False,
         index=True,
-        comment="Full document type name (e.g., ANNUAL, TAX)",
+        comment="Full document type name (e.g., Credit Opinion, TAX)",
     )
     
     abbreviation = Column(
         String(10),
         nullable=False,
-        comment="Standard abbreviation (e.g., ANN, TAX)",
+        comment="Standard abbreviation (e.g., CO, TAX)",
     )
     
     is_active = Column(
