@@ -219,12 +219,12 @@ class ReportTrackerUpdateRequest(BaseModel):
                     "This completely replaces the existing app_data of the target step."
     )
     
-    @model_validator(mode='after')
-    def validate_at_least_one_field(self):
+    @root_validator(pre=False, skip_on_failure=True)
+    def validate_at_least_one_field(cls, values):
         """Ensure at least one of 'action' or 'app_data' is provided."""
-        if self.action is None and self.app_data is None:
+        if values.get('action') is None and values.get('app_data') is None:
             raise ValueError("At least one of 'action' or 'app_data' must be provided")
-        return self
+        return values
     
     class Config:
         json_schema_extra = {
