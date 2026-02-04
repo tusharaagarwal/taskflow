@@ -17,6 +17,7 @@ from app.db.database import Base, get_db
 from app.models.content_product import ContentProduct
 from app.models.report_tracker import ReportTracker
 from app.models.workflow import Workflow
+from app.models.abbreviation import DocumentTypeAbbreviation
 
 # Test database URL - using SQLite in-memory for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -48,6 +49,24 @@ SAMPLE_REPORT_TRACKERS = [
         "workflow_steps_json": "{}",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+]
+
+SAMPLE_ABBREVIATIONS = [
+    {
+        "document_type": "Credit Opinion",
+        "abbreviation": "CO",
+        "is_active": True
+    },
+    {
+        "document_type": "Research Update",
+        "abbreviation": "RU",
+        "is_active": True
+    },
+    {
+        "document_type": "TAX",
+        "abbreviation": "TAX",
+        "is_active": True
     }
 ]
 
@@ -176,10 +195,27 @@ async def test_report_trackers(db):
     return trackers
 
 @pytest.fixture
-async def test_data(db, test_content_products, test_workflows, test_report_trackers):
+async def test_abbreviations(db):
+    """Load test abbreviations into the database."""
+    abbreviations = []
+    for abbr_data in SAMPLE_ABBREVIATIONS:
+        abbr = DocumentTypeAbbreviation(**abbr_data)
+        db.add(abbr)
+        abbreviations.append(abbr)
+    
+    await db.commit()
+    
+    for abbr in abbreviations:
+        await db.refresh(abbr)
+    
+    return abbreviations
+
+@pytest.fixture
+async def test_data(db, test_content_products, test_workflows, test_report_trackers, test_abbreviations):
     """Load all test data into the database."""
     return {
         "content_products": test_content_products,
         "workflows": test_workflows,
-        "report_trackers": test_report_trackers
+        "report_trackers": test_report_trackers,
+        "abbreviations": test_abbreviations
     }
