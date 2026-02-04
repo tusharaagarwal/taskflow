@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     cache_backend: str = Field(default="memory", description="Cache backend (memory/redis)")
     redis_url: str = Field(default="redis://localhost:6379", description="Redis URL")
     
+    # Abbreviation cache settings
+    abbreviation_cache_enabled: bool = Field(default=True, description="Enable abbreviation caching")
+    abbreviation_cache_ttl: int = Field(default=3600, description="Abbreviation cache TTL in seconds")
+    abbreviation_cache_max_size: int = Field(default=1000, description="Abbreviation cache max size")
+    abbreviation_raise_on_not_found: bool = Field(default=True, description="Raise exception when abbreviation not found")
+    abbreviation_default: str = Field(default="DOC", description="Default abbreviation when not found")
+    
     # Email settings
     email_enabled: bool = Field(default=False, description="Enable email notifications")
     smtp_host: str = Field(default="localhost", description="SMTP host")
