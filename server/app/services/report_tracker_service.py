@@ -128,7 +128,7 @@ class ReportTrackerService:
         Returns:
             Formatted report ID strings (e.g. 'CO-100001')
         """
-        from abbreviation_module import AbbreviationService
+        from app.services.abbreviation_service import AbbreviationService
         from sqlalchemy import text
         
         abbreviation_service = AbbreviationService()
