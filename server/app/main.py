@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
 import time
-from app.routers.v1 import report_tracker, root, cpm_mock
+from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock
 from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
@@ -71,6 +71,7 @@ app.add_middleware(
 # Include routers
 app.include_router(root.router, tags=["root"])
 app.include_router(health.router, prefix="/v1/health", tags=["health"])
+app.include_router(abbreviation.router, prefix="/v1")
 app.include_router(report_tracker.router, prefix="/v1")
 app.include_router(cpm_mock.router, prefix="/v1")  # TEMP MOCK: CPM API
 
