@@ -1,0 +1,200 @@
+name: CI Gates
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - qa
+      - main
+      - feature/cicd
+      - uat
+    paths:
+      - 'server/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ============================================
+  # CHANGE DETECTION
+  # ============================================
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      docker: ${{ steps.filter.outputs.docker }}
+      cicd: ${{ steps.filter.outputs.cicd }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check which paths changed
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'server/**'
+              - '!server/Dockerfile*'
+            docker:
+              - '**/Dockerfile*'
+            cicd:
+              - '.github/workflows/**'
+  # ============================================
+  # BACKEND CI GATES
+  # ============================================
+  backend-gates:
+    name: Backend CI Gates
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true' or needs.detect-changes.outputs.cicd == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./server
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Poetry
+        run: pipx install poetry
+      
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'poetry'
+          cache-dependency-path: './server/poetry.lock'
+      
+      - name: Install Dependencies
+        run: |
+          poetry lock
+          poetry install --with dev --no-interaction
+      
+      - name: Lint with Ruff
+        run: poetry run ruff check . --output-format=github
+        continue-on-error: true  # Allow tests to run even if linting fails
+      
+      - name: Format Check
+        run: poetry run ruff format --check .
+        continue-on-error: true  # Allow tests to run even if format check fails
+      
+      - name: Run Tests with Coverage (70% threshold)
+        run: |
+          echo "📊 Running tests with 70% coverage requirement..."
+          poetry run pytest tests/
+        continue-on-error: false
+      
+      - name: Coverage Report Summary
+        if: always()
+        run: |
+          echo "### 📊 Backend Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Display already-generated coverage (don't re-run pytest to avoid duplicate args)
+          poetry run coverage report --skip-empty 2>&1 | sed 's/\x1b\[[0-9;]*m//g' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-${{ github.sha }}
+          path: |
+            server/coverage.xml
+            server/htmlcov/
+          retention-days: 7
+      
+      # Note: Codecov removed - using GitHub native artifacts + PR comments
+      # Future: Add notification jobs here (email, Teams, Slack) that read artifacts
+
+  # ============================================
+  # DOCKER BUILD DRY RUN (only when Dockerfiles change)
+  # ============================================
+  docker-build-gates:
+    name: Docker Build Validation
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - context: ./server
+            dockerfile: Dockerfile.dev
+            image: orchestrator-backend-dev
+            description: "Backend Development"
+          - context: ./server
+            dockerfile: Dockerfile.qa
+            image: orchestrator-backend-qa
+            description: "Backend QA"
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker Image - ${{ matrix.description }}
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/${{ matrix.dockerfile }}
+          push: false
+          tags: ${{ matrix.image }}:ci-test-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          load: true
+      
+      - name: Inspect Docker Image
+        run: |
+          echo "### 🐳 Docker Image: ${{ matrix.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          docker images ${{ matrix.image }}:ci-test-${{ github.sha }} >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Build successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # CI GATES SUMMARY
+  # ============================================
+  ci-gates-summary:
+    name: CI Gates Summary
+    needs: [detect-changes, backend-gates, docker-build-gates]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check CI Gates Results
+        run: |
+          echo "### 🎯 CI Gates Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          
+          if [ "${{ needs.backend-gates.result }}" == "success" ]; then
+            echo "| Backend Gates | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.backend-gates.result }}" == "skipped" ]; then
+            echo "| Backend Gates | ⏭️ Skipped (no changes) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Backend Gates | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.docker-build-gates.result }}" == "success" ]; then
+            echo "| Docker Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.docker-build-gates.result }}" == "skipped" ]; then
+            echo "| Docker Build | ⏭️ Skipped (no Dockerfile changes) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Docker Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.head_ref }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`${{ github.base_ref }}\`" >> $GITHUB_STEP_SUMMARY
+
