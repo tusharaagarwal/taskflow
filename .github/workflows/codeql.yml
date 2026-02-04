@@ -1,0 +1,79 @@
+name: CodeQL Security Scan
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - qa
+      - main
+      - feature/cicd
+      - uat
+  push:
+    branches:
+      - develop
+      - qa
+      - main
+      - feature/cicd
+      - uat
+  schedule:
+    # Run full deep scan nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  analyze:
+    name: CodeQL Analysis (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['python']
+        # python covers FastAPI in server/
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+          # Use extended security queries for comprehensive scanning
+          config: |
+            name: "Security and Quality Analysis"
+            disable-default-queries: false
+            queries:
+              - uses: security-extended
+              - uses: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+          upload: true
+          # Note: upload=true automatically uploads SARIF results
+          # No need for separate upload-sarif step
+      
+      - name: Security Summary
+        if: always()
+        run: |
+          echo "### 🔒 CodeQL Security Scan - ${{ matrix.language }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Language: \`${{ matrix.language }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Queries: security-extended, security-and-quality" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Scan completed. Check Security tab for detailed results." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** This is a security scan and does not block PR merges." >> $GITHUB_STEP_SUMMARY
+
