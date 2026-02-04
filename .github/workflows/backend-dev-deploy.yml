@@ -1,0 +1,112 @@
+name: Backend Dev - Build & Deploy
+
+on:
+  push:
+    branches:
+      - develop
+      - feature/cicd
+    paths:
+      - 'server/**'
+      - '.github/workflows/backend-dev-deploy.yml'
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: prism/orchestrator/backend
+  ENVIRONMENT: dev
+  AWS_ROLE_ARN: arn:aws:iam::${{ secrets.AWS_DEV_ACCOUNT_ID }}:role/github-cicd-role
+  ECS_CLUSTER: prism-dev-ecs-cluster
+  ECS_SERVICE: prism-dev-orchestrator-backend
+  CONTAINER_NAME: orchestrator-backend
+
+jobs:
+  build-and-deploy:
+    name: Build Docker Image & Deploy to ECS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-session-name: github-actions-backend-dev-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Generate image tags
+        id: meta
+        run: |
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          IMAGE_TAG="${{ env.ENVIRONMENT }}-${COMMIT_HASH}-${{ github.run_number }}"
+          LATEST_TAG="${{ env.ENVIRONMENT }}-latest"
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "LATEST_TAG=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "COMMIT_HASH=${COMMIT_HASH}" >> $GITHUB_OUTPUT
+          echo "TIMESTAMP=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "FULL_IMAGE_URI=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        working-directory: ./server
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.meta.outputs.IMAGE_TAG }}
+          LATEST_TAG: ${{ steps.meta.outputs.LATEST_TAG }}
+        run: |
+          docker build \
+            -f Dockerfile.${{ env.ENVIRONMENT }} \
+            -t ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG} \
+            -t ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${LATEST_TAG} \
+            .
+
+      - name: Push images to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.meta.outputs.IMAGE_TAG }}
+          LATEST_TAG: ${{ steps.meta.outputs.LATEST_TAG }}
+        run: |
+          docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}
+          docker push ${ECR_REGISTRY}/${{ env.ECR_REPOSITORY }}:${LATEST_TAG}
+
+      - name: Force ECS Service Deployment
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+          echo "⏳ Waiting for service to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deployment summary
+        run: |
+          echo "### 🚀 Backend Dev Deployment Complete! ###"
+          echo ""
+          echo "**Environment:** ${{ env.ENVIRONMENT }}"
+          echo "**Commit:** ${{ steps.meta.outputs.COMMIT_HASH }}"
+          echo "**Image Tag:** ${{ steps.meta.outputs.IMAGE_TAG }}"
+          echo "**Image URI:** ${{ steps.meta.outputs.FULL_IMAGE_URI }}"
+          echo ""
+          echo "**AWS Resources:**"
+          echo "- Region: ${{ env.AWS_REGION }}"
+          echo "- Cluster: ${{ env.ECS_CLUSTER }}"
+          echo "- Service: ${{ env.ECS_SERVICE }}"
+          echo "- Container: ${{ env.CONTAINER_NAME }}"
+

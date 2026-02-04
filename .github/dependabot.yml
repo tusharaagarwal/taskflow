@@ -1,0 +1,90 @@
+version: 2
+
+updates:
+
+  # ============================================
+  # BACKEND PYTHON DEPENDENCIES
+  # ============================================
+  - package-ecosystem: "pip"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "02:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "backend"
+      - "python"
+    commit-message:
+      prefix: "chore(deps-backend)"
+      include: "scope"
+    groups:
+      # Group FastAPI ecosystem
+      fastapi:
+        patterns:
+          - "fastapi"
+          - "uvicorn"
+          - "pydantic"
+          - "python-multipart"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group database packages
+      database:
+        patterns:
+          - "sqlalchemy"
+          - "alembic"
+          - "asyncpg"
+          - "psycopg2-binary"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group testing packages
+      testing-python:
+        patterns:
+          - "pytest"
+          - "pytest-*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ============================================
+  # BACKEND DOCKER BASE IMAGES
+  # ============================================
+  - package-ecosystem: "docker"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "02:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "docker"
+      - "infrastructure"
+      - "backend"
+    commit-message:
+      prefix: "chore(docker-backend)"
+      include: "scope"
+
+  # ============================================
+  # GITHUB ACTIONS WORKFLOWS
+  # ============================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "first monday"
+      time: "02:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci-cd"
+      - "github-actions"
+      - "infrastructure"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
