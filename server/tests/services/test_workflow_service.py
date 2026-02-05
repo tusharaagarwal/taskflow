@@ -137,3 +137,135 @@ class TestWorkflowService:
 
         with pytest.raises(Exception):
             await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_empty_row(self):
+        """Test returns empty dict when row is None."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_empty_row_data(self):
+        """Test returns empty dict when row[0] is None."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, i: None
+        mock_result.fetchone.return_value = mock_row
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_invalid_json_string(self):
+        """Test returns empty dict when workflow_data string is invalid JSON."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, i: "not valid json {{{"
+        mock_result.fetchone.return_value = mock_row
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_parsed_non_dict_list(self):
+        """Test returns empty dict when parsed JSON is not dict or list."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, i: "123"
+        mock_result.fetchone.return_value = mock_row
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_unexpected_type(self):
+        """Test returns empty dict when workflow_data is unexpected type (e.g. int)."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, i: 12345
+        mock_result.fetchone.return_value = mock_row
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_get_workflow_json_from_workflow_returns_list(self):
+        """Test returns list when workflow_data is already a list."""
+        mock_db = AsyncMock()
+        mock_table_exists = MagicMock()
+        mock_table_exists.scalar.return_value = True
+        mock_workflow_exists = MagicMock()
+        mock_workflow_exists.scalar.return_value = True
+        mock_result = MagicMock()
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda s, i: [{"step_id": "one"}]
+        mock_result.fetchone.return_value = mock_row
+
+        mock_db.execute.side_effect = [
+            mock_table_exists,
+            mock_workflow_exists,
+            mock_result,
+        ]
+
+        result = await WorkflowService.get_workflow_json_from_workflow(mock_db, 1)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["step_id"] == "one"
