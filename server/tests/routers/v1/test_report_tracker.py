@@ -2,7 +2,6 @@ import pytest
 import asyncio
 import pytest_asyncio
 from fastapi import status
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -20,6 +19,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 # Import after setting up the path
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, patch
 from app.main import app as main_app
 from app.db.database import Base, get_db
@@ -133,8 +133,8 @@ SAMPLE_CONTENT_PRODUCTS = [
 ]
 
 # Create a test app with only the report tracker router
-test_app = FastAPI()
-test_app.include_router(report_tracker_router)
+mock_app = FastAPI()
+mock_app.include_router(report_tracker_router)
 
 # Apply the mock to ContentProduct.get_workflow_json
 ContentProduct.get_workflow_json = mock_get_workflow_json
@@ -246,15 +246,17 @@ async def client(db):
         try:
             yield db
         finally:
-            await db.close()
-    
-    test_app.dependency_overrides[get_db] = override_get_db
-    
-    # Create a new TestClient for each test
-    with TestClient(test_app) as test_client:
-        yield test_client
-    
-    test_app.dependency_overrides.clear()
+            pass  # Session lifecycle managed by fixture
+
+    mock_app.dependency_overrides[get_db] = override_get_db
+
+    async with AsyncClient(
+        transport=ASGITransport(app=mock_app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
+
+    mock_app.dependency_overrides.clear()
 
 @pytest_asyncio.fixture(scope="function")
 async def sample_report_tracker(db):
@@ -319,7 +321,7 @@ class TestReportTracker:
         }
         
         # Make request
-        response = client.post("/report-tracker/", json=report_data)
+        response = await client.post("/report-tracker/", json=report_data)
         
         # Assertions
         if response.status_code != status.HTTP_201_CREATED:
@@ -346,12 +348,12 @@ class TestReportTracker:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         
         # Now get the report
         report_id = create_response.json()["report_id"]
-        response = client.get(f"/report-tracker/{report_id}")
+        response = await client.get(f"/report-tracker/{report_id}")
         
         # Assertions
         assert response.status_code == status.HTTP_200_OK
@@ -375,7 +377,7 @@ class TestReportTracker:
             }
 
             # Use the sample_report_tracker directly (no need to await)
-            response = client.put(
+            response = await client.put(
                 f"/report-tracker/{sample_report_tracker.report_id}",
                 json=update_data
             )
@@ -390,7 +392,7 @@ class TestReportTracker:
     @pytest.mark.asyncio
     async def test_get_report_status(self, client, sample_report_tracker):
         # Get status
-        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status")
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/status")
         
         # Assertions
         assert response.status_code == status.HTTP_200_OK
@@ -402,13 +404,13 @@ class TestReportTracker:
     async def test_get_report_status_with_include_audit_param(self, client, sample_report_tracker):
         """Test status endpoint accepts include_audit query parameter."""
         # Test with include_audit=true
-        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=true")
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=true")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "progress_tracker" in data
 
         # Test with include_audit=false
-        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=false")
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/status?include_audit=false")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert "progress_tracker" in data
@@ -417,7 +419,7 @@ class TestReportTracker:
     async def test_get_report_workflow(self, client, sample_report_tracker):
         """Test getting workflow JSON for a report tracker."""
         # Get workflow
-        response = client.get(f"/report-tracker/{sample_report_tracker.report_id}/workflow")
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/workflow")
 
         # Assertions
         assert response.status_code == status.HTTP_200_OK
@@ -431,7 +433,7 @@ class TestReportTracker:
     @pytest.mark.asyncio
     async def test_get_nonexistent_report_workflow(self, client, db):
         """Test getting workflow for a non-existent report."""
-        response = client.get("/report-tracker/nonexistent-report-id/workflow")
+        response = await client.get("/report-tracker/nonexistent-report-id/workflow")
 
         # Should return 404 Not Found
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -483,12 +485,12 @@ class TestReportTracker:
             
         with patch.object(ReportTrackerService, '_generate_unique_report_id', side_effect=mock_seq_generator):
             for report in reports:
-                response = client.post("/report-tracker/", json=report)
+                response = await client.post("/report-tracker/", json=report)
                 assert response.status_code == status.HTTP_201_CREATED
                 created_report_ids.append(response.json()["report_id"])
         
         # List all reports
-        response = client.get("/report-tracker/")
+        response = await client.get("/report-tracker/")
         
         # Assertions
         assert response.status_code == status.HTTP_200_OK
@@ -515,7 +517,7 @@ class TestReportTracker:
         await db.commit()
         
         # Verify the database is empty
-        response = client.get("/report-tracker/")
+        response = await client.get("/report-tracker/")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
         assert isinstance(data, list)
@@ -532,7 +534,7 @@ class TestReportTracker:
             "due_date": "2025-11-15T18:00:00Z"
         }
         
-        response = client.put(
+        response = await client.put(
             "/report-tracker/nonexistent-report-id",
             json=update_data
         )
@@ -546,7 +548,7 @@ class TestReportTracker:
     @pytest.mark.asyncio
     async def test_get_nonexistent_report_status(self, client, db):
         # Try to get status for a non-existent report
-        response = client.get("/report-tracker/nonexistent-report-id/status")
+        response = await client.get("/report-tracker/nonexistent-report-id/status")
         
         # Should return 404 Not Found
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -557,7 +559,7 @@ class TestReportTracker:
     @pytest.mark.asyncio
     async def test_get_nonexistent_report_tracker(self, client, db):
         # Try to get a non-existent report
-        response = client.get("/report-tracker/nonexistent-report-id")
+        response = await client.get("/report-tracker/nonexistent-report-id")
         
         # Should return 404 Not Found
         assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -721,18 +723,18 @@ class TestWorkflowActions:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
         
         # For backward actions, move forward once to have an in-progress step
         if WorkflowActionType.is_backward_action(action):
-            warmup_response = client.put(f"/report-tracker/{report_id}", json={"action": "accept"})
+            warmup_response = await client.put(f"/report-tracker/{report_id}", json={"action": "accept"})
             assert warmup_response.status_code == status.HTTP_200_OK
 
         # Update with the action
         update_data = {"action": action}
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
         
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -759,16 +761,16 @@ class TestWorkflowActions:
                 "document_type": "Credit Opinion",
                 "action_code": "APPROVED"
             }
-            create_response = client.post("/report-tracker/", json=report_data)
+            create_response = await client.post("/report-tracker/", json=report_data)
             report_id = create_response.json()["report_id"]
             
             # Apply the action
             update_data = {"action": action}
-            response = client.put(f"/report-tracker/{report_id}", json=update_data)
+            response = await client.put(f"/report-tracker/{report_id}", json=update_data)
             assert response.status_code == status.HTTP_200_OK
             
             # Get the status to verify behavior
-            status_response = client.get(f"/report-tracker/{report_id}/status")
+            status_response = await client.get(f"/report-tracker/{report_id}/status")
             results.append(status_response.json())
         
         # All forward actions should produce similar results
@@ -798,19 +800,19 @@ class TestWorkflowActions:
                 "document_type": "Credit Opinion",
                 "action_code": "APPROVED"
             }
-            create_response = client.post("/report-tracker/", json=report_data)
+            create_response = await client.post("/report-tracker/", json=report_data)
             report_id = create_response.json()["report_id"]
             
             # Move forward first
-            client.put(f"/report-tracker/{report_id}", json={"action": "accept"})
+            await client.put(f"/report-tracker/{report_id}", json={"action": "accept"})
             
             # Apply the backward action
             update_data = {"action": action}
-            response = client.put(f"/report-tracker/{report_id}", json=update_data)
+            response = await client.put(f"/report-tracker/{report_id}", json=update_data)
             assert response.status_code == status.HTTP_200_OK
             
             # Get the status to verify behavior
-            status_response = client.get(f"/report-tracker/{report_id}/status")
+            status_response = await client.get(f"/report-tracker/{report_id}/status")
             results.append(status_response.json())
         
         # All backward actions should produce similar results
@@ -835,15 +837,15 @@ class TestWorkflowActions:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         report_id = create_response.json()["report_id"]
         
         # Try invalid action
         update_data = {"action": "invalid_action"}
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
         
         # Should return 422 validation error
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 class TestAppDataUpdate:
@@ -865,7 +867,7 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
@@ -877,7 +879,7 @@ class TestAppDataUpdate:
                 "metadata": {"source": "test_app"}
             }
         }
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -905,12 +907,12 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
         # Get the instance_id of the first step
-        get_response = client.get(f"/report-tracker/{report_id}/status")
+        get_response = await client.get(f"/report-tracker/{report_id}/status")
         progress_tracker = get_response.json()["progress_tracker"]
         first_step_instance_id = progress_tracker[0]["instance_id"]
 
@@ -922,7 +924,7 @@ class TestAppDataUpdate:
                 "review_notes": "Looks good"
             }
         }
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -949,12 +951,12 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
         # Get the instance_id of the first step before action
-        get_response = client.get(f"/report-tracker/{report_id}/status")
+        get_response = await client.get(f"/report-tracker/{report_id}/status")
         progress_tracker = get_response.json()["progress_tracker"]
         first_step_instance_id = progress_tracker[0]["instance_id"]
 
@@ -966,7 +968,7 @@ class TestAppDataUpdate:
                 "submission_notes": "Ready for review"
             }
         }
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -996,16 +998,16 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
         # Try empty update
         update_data = {}
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should return 422 validation error
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
     @pytest.mark.asyncio
     async def test_update_invalid_instance_id_fails(self, client, db):
@@ -1022,7 +1024,7 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
@@ -1031,10 +1033,10 @@ class TestAppDataUpdate:
             "instance_id": "non-existent-instance-id",
             "app_data": {"some": "data"}
         }
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should return 422 error
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
         assert "not found" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
@@ -1052,7 +1054,7 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
@@ -1063,7 +1065,7 @@ class TestAppDataUpdate:
                 "field2": "value2"
             }
         }
-        response1 = client.put(f"/report-tracker/{report_id}", json=update_data1)
+        response1 = await client.put(f"/report-tracker/{report_id}", json=update_data1)
         assert response1.status_code == status.HTTP_200_OK
 
         # Second update with different app_data (should replace, not merge)
@@ -1072,7 +1074,7 @@ class TestAppDataUpdate:
                 "field3": "value3"
             }
         }
-        response2 = client.put(f"/report-tracker/{report_id}", json=update_data2)
+        response2 = await client.put(f"/report-tracker/{report_id}", json=update_data2)
         assert response2.status_code == status.HTTP_200_OK
 
         # Verify app_data was replaced (not merged)
@@ -1100,7 +1102,7 @@ class TestAppDataUpdate:
             "document_type": "Credit Opinion",
             "action_code": "APPROVED"
         }
-        create_response = client.post("/report-tracker/", json=report_data)
+        create_response = await client.post("/report-tracker/", json=report_data)
         assert create_response.status_code == status.HTTP_201_CREATED
         report_id = create_response.json()["report_id"]
 
@@ -1126,7 +1128,7 @@ class TestAppDataUpdate:
                 "nullable_field": None
             }
         }
-        response = client.put(f"/report-tracker/{report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -1215,10 +1217,10 @@ class TestActionValidation:
 
         # Try to use "accept" action which is not in action_available
         update_data = {"action": "accept"}
-        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
 
         # Should return 422 with clear error message
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
         data = response.json()
         assert "detail" in data
         assert "not allowed" in data["detail"].lower()
@@ -1294,7 +1296,7 @@ class TestActionValidation:
 
         # Use "accept" action which IS in action_available
         update_data = {"action": "accept"}
-        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
@@ -1353,7 +1355,7 @@ class TestActionValidation:
 
         # Try any action - should be allowed
         update_data = {"action": "accept"}
-        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
 
         # Should return 200 (success) since empty action_available allows all actions
         assert response.status_code == status.HTTP_200_OK
@@ -1416,14 +1418,14 @@ class TestActionValidation:
 
         # Try "accept" which is in progress_tracker but NOT in workflow_json
         update_data = {"action": "accept"}
-        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
 
         # Should fail because workflow_json is the source of truth
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
         # Try "submit" which IS in workflow_json
         update_data = {"action": "submit"}
-        response = client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
+        response = await client.put(f"/report-tracker/{tracker.report_id}", json=update_data)
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK

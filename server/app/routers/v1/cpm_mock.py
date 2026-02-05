@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, Any
 
-from app.config.feature_flags import DEFAULT_MOCK_WORKFLOW_ID
+from app.config_settings.feature_flags import DEFAULT_MOCK_WORKFLOW_ID
 
 router = APIRouter(prefix="/cpm", tags=["CPM Mock"])
 

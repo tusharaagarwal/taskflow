@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -10,31 +10,29 @@ class DocumentTypeAbbreviationCreateRequest(BaseModel):
     document_type: str = Field(
         ...,
         description="Full document type name (e.g., Credit Opinion, TAX)",
-        max_length=100,
-        example="Credit Opinion"
+        max_length=100
     )
     
     abbreviation: str = Field(
         ...,
         description="Standard abbreviation (e.g., CO, TAX)",
-        max_length=10,
-        example="CO"
+        max_length=10
     )
     
     is_active: bool = Field(
         default=True,
-        description="Whether this abbreviation is active",
-        example=True
+        description="Whether this abbreviation is active"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document_type": "Credit Opinion",
                 "abbreviation": "CO",
                 "is_active": True
             }
         }
+    )
 
 
 class DocumentTypeAbbreviationUpdateRequest(BaseModel):
@@ -43,31 +41,29 @@ class DocumentTypeAbbreviationUpdateRequest(BaseModel):
     document_type: Optional[str] = Field(
         None,
         description="Full document type name (e.g., Credit Opinion, TAX)",
-        max_length=100,
-        example="Credit Opinion"
+        max_length=100
     )
     
     abbreviation: Optional[str] = Field(
         None,
         description="Standard abbreviation (e.g., CO, TAX)",
-        max_length=10,
-        example="CO"
+        max_length=10
     )
     
     is_active: Optional[bool] = Field(
         None,
-        description="Whether this abbreviation is active",
-        example=True
+        description="Whether this abbreviation is active"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document_type": "Credit Opinion",
                 "abbreviation": "CO",
                 "is_active": True
             }
         }
+    )
 
 
 class DocumentTypeAbbreviationResponse(BaseModel):
@@ -80,8 +76,7 @@ class DocumentTypeAbbreviationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DocumentTypeAbbreviationListResponse(BaseModel):
@@ -92,8 +87,7 @@ class DocumentTypeAbbreviationListResponse(BaseModel):
     abbreviation: str
     is_active: bool
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AbbreviationLookupRequest(BaseModel):
@@ -101,16 +95,16 @@ class AbbreviationLookupRequest(BaseModel):
     
     document_type: str = Field(
         ...,
-        description="Document type to look up abbreviation for",
-        example="Credit Opinion"
+        description="Document type to look up abbreviation for"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document_type": "Credit Opinion"
             }
         }
+    )
 
 
 class AbbreviationLookupResponse(BaseModel):
@@ -118,30 +112,28 @@ class AbbreviationLookupResponse(BaseModel):
     
     document_type: str = Field(
         ...,
-        description="The document type that was looked up",
-        example="Credit Opinion"
+        description="The document type that was looked up"
     )
     
     abbreviation: str = Field(
         ...,
-        description="The abbreviation for the document type",
-        example="CO"
+        description="The abbreviation for the document type"
     )
     
     found: bool = Field(
         ...,
-        description="Whether the abbreviation was found in the database",
-        example=True
+        description="Whether the abbreviation was found in the database"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "document_type": "Credit Opinion",
                 "abbreviation": "CO",
                 "found": True
             }
         }
+    )
 
 
 class CacheStatsResponse(BaseModel):
@@ -150,71 +142,70 @@ class CacheStatsResponse(BaseModel):
     hits: int = Field(
         ...,
         description="Number of cache hits",
-        example=150
+        json_schema_extra={"example": 150}
     )
     
     misses: int = Field(
         ...,
         description="Number of cache misses",
-        example=25
+        json_schema_extra={"example": 25}
     )
     
     hit_rate: float = Field(
         ...,
         description="Cache hit rate as a percentage",
-        example=0.8571
+        json_schema_extra={"example": 0.8571}
     )
     
     evictions: int = Field(
         ...,
         description="Number of cache evictions",
-        example=5
+        json_schema_extra={"example": 5}
     )
     
     expirations: int = Field(
         ...,
         description="Number of cache expirations",
-        example=10
+        json_schema_extra={"example": 10}
     )
     
     invalidations: int = Field(
         ...,
         description="Number of cache invalidations",
-        example=3
+        json_schema_extra={"example": 3}
     )
     
     errors: int = Field(
         ...,
         description="Number of cache errors",
-        example=0
+        json_schema_extra={"example": 0}
     )
     
     size: int = Field(
         ...,
         description="Current cache size",
-        example=75
+        json_schema_extra={"example": 75}
     )
     
     max_size: int = Field(
         ...,
         description="Maximum cache size",
-        example=1000
+        json_schema_extra={"example": 1000}
     )
     
     ttl_seconds: int = Field(
         ...,
         description="Cache TTL in seconds",
-        example=3600
+        json_schema_extra={"example": 3600}
     )
     
     enabled: bool = Field(
         ...,
         description="Whether caching is enabled",
-        example=True
+        json_schema_extra={"example": True}
     )
     
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CacheInvalidationRequest(BaseModel):
@@ -222,12 +213,11 @@ class CacheInvalidationRequest(BaseModel):
     
     document_type: Optional[str] = Field(
         None,
-        description="Specific document type to invalidate. If not provided, invalidates entire cache.",
-        example="Credit Opinion"
+        description="Specific document type to invalidate. If not provided, invalidates entire cache."
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "examples": [
                 {
                     "summary": "Invalidate entire cache",
@@ -241,6 +231,7 @@ class CacheInvalidationRequest(BaseModel):
                 }
             ]
         }
+    )
 
 
 class CacheInvalidationResponse(BaseModel):
@@ -248,20 +239,19 @@ class CacheInvalidationResponse(BaseModel):
     
     invalidated_count: int = Field(
         ...,
-        description="Number of cache entries invalidated",
-        example=5
+        description="Number of cache entries invalidated"
     )
     
     message: str = Field(
         ...,
-        description="Description of what was invalidated",
-        example="Invalidated 5 cache entries"
+        description="Description of what was invalidated"
     )
     
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "invalidated_count": 5,
                 "message": "Invalidated 5 cache entries"
             }
         }
+    )

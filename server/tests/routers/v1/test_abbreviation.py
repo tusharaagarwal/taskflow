@@ -15,8 +15,8 @@ from app.routers.v1.abbreviation import router as abbreviation_router
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 # Create test app
-test_app = FastAPI()
-test_app.include_router(abbreviation_router)
+mock_app = FastAPI()
+mock_app.include_router(abbreviation_router)
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -56,12 +56,12 @@ async def client(db):
         finally:
             await db.close()
     
-    test_app.dependency_overrides[get_db] = override_get_db
+    mock_app.dependency_overrides[get_db] = override_get_db
     
-    with TestClient(test_app) as test_client:
+    with TestClient(mock_app) as test_client:
         yield test_client
     
-    test_app.dependency_overrides.clear()
+    mock_app.dependency_overrides.clear()
 
 class TestAbbreviation:
     @pytest.mark.asyncio
@@ -320,7 +320,7 @@ class TestAbbreviation:
         }
         
         response = client.post("/abbreviation/", json=invalid_data)
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
     @pytest.mark.asyncio
     async def test_create_abbreviation_too_long_abbreviation(self, client, db):
@@ -332,4 +332,4 @@ class TestAbbreviation:
         }
         
         response = client.post("/abbreviation/", json=invalid_data)
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
