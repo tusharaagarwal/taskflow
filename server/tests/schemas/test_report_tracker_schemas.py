@@ -4,11 +4,20 @@ Unit tests for report tracker Pydantic schemas.
 import pytest
 from pydantic import ValidationError
 from app.schemas.report_tracker import (
+    get_workflow_json,
     ReportTrackerCreateRequest,
     ReportTrackerUpdateRequest,
     AssignUserToStepRequest,
     generate_report_id,
 )
+
+
+class TestGetWorkflowJson:
+    """Tests for get_workflow_json helper."""
+
+    def test_returns_empty_dict(self):
+        """get_workflow_json returns empty dict."""
+        assert get_workflow_json() == {}
 
 
 class TestGenerateReportId:
@@ -76,6 +85,16 @@ class TestReportTrackerCreateRequest:
         result = ReportTrackerCreateRequest.create_workflow_steps_json(workflow)
 
         assert len(result["progress_tracker"]) > 0
+
+    def test_create_workflow_steps_json_first_step_no_step_id(self):
+        """When first step has no step_id, progress_tracker is empty."""
+        workflow = {
+            "steps": [
+                {"step_name": "No Id", "stage_name": "A", "transitions": {"success_goto": "NA"}},
+            ]
+        }
+        result = ReportTrackerCreateRequest.create_workflow_steps_json(workflow)
+        assert result["progress_tracker"] == []
 
 
 class TestReportTrackerUpdateRequest:
