@@ -51,7 +51,7 @@ async def create_report_tracker(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except ValueError as e:
@@ -133,7 +133,7 @@ async def update_report_tracker(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except ValueError as e:
@@ -281,7 +281,7 @@ async def assign_user_to_step(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except HTTPException as e:

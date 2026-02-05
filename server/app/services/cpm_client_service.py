@@ -31,7 +31,7 @@ class CPMClientService:
             ValueError: If CPM record not found
             NotImplementedError: If real API is requested but not yet implemented
         """
-        from app.config.feature_flags import MOCK_CPM_API_USED
+        from app.config_settings.feature_flags import MOCK_CPM_API_USED
         
         if MOCK_CPM_API_USED:
             # Use mock API - direct function call (faster than HTTP)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, root_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Optional, Literal, Any, Dict
 from datetime import datetime, timezone
 from uuid import UUID
@@ -44,16 +44,16 @@ class ReportTrackerCreateRequest(BaseModel):
         document_type: Document type for auto-generating report ID (e.g., "ANNUAL" -> "ANN-100001")
         action_code: Action code (stored as-is)
     """
-    transaction_id: str = Field(..., example="TXN-12345", description="Transaction identifier")
-    pr_id: str = Field(..., example="PR-67890", description="PR identifier")
-    content_type: str = Field(..., example="Credit Opinion", description="Type of content product")
-    lob: str = Field(..., example="banking", description="Line of Business")
-    sub_lob: str = Field(..., example="figbanking", description="Sub Line of Business")
-    document_type: str = Field(..., example="Credit Opinion", description="Document type for auto-generating report ID")
-    action_code: str = Field(..., example="APPROVED", description="Action code")
+    transaction_id: str = Field(..., description="Transaction identifier")
+    pr_id: str = Field(..., description="PR identifier")
+    content_type: str = Field(..., description="Type of content product")
+    lob: str = Field(..., description="Line of Business")
+    sub_lob: str = Field(..., description="Sub Line of Business")
+    document_type: str = Field(..., description="Document type for auto-generating report ID")
+    action_code: str = Field(..., description="Action code")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "transaction_id": "TXN-12345",
                 "pr_id": "PR-67890",
@@ -64,6 +64,7 @@ class ReportTrackerCreateRequest(BaseModel):
                 "action_code": "APPROVED"
             }
         }
+    )
 
     @classmethod
     def create_workflow_steps_json(cls, workflow_json: Optional[dict] = None) -> dict:
@@ -219,15 +220,15 @@ class ReportTrackerUpdateRequest(BaseModel):
                     "This completely replaces the existing app_data of the target step."
     )
     
-    @root_validator(pre=False, skip_on_failure=True)
-    def validate_at_least_one_field(cls, values):
+    @model_validator(mode='after')
+    def validate_at_least_one_field(self) -> 'ReportTrackerUpdateRequest':
         """Ensure at least one of 'action' or 'app_data' is provided."""
-        if values.get('action') is None and values.get('app_data') is None:
+        if self.action is None and self.app_data is None:
             raise ValueError("At least one of 'action' or 'app_data' must be provided")
-        return values
+        return self
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "examples": [
                 {
                     "summary": "Action only - Accept current step",
@@ -276,6 +277,7 @@ class ReportTrackerUpdateRequest(BaseModel):
                 }
             ]
         }
+    )
 
 
 class ReportTrackerStatusResponse(BaseModel):
@@ -289,8 +291,7 @@ class ReportTrackerStatusResponse(BaseModel):
     report_id: str
     progress_tracker: list
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportTrackerWorkflowResponse(BaseModel):
@@ -306,8 +307,7 @@ class ReportTrackerWorkflowResponse(BaseModel):
     report_id: str
     workflow_json: Optional[dict] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportTrackerStatusUpdateRequest(BaseModel):
@@ -336,33 +336,30 @@ class ReportTrackerStatusUpdateRequest(BaseModel):
         None,
         description="Path for dynamic transition resolution (e.g., 'exemption/errc/approved'). "
                     "Used when transitions have nested conditional paths instead of simple string values.",
-        example="exemption/errc/approved"
+        json_schema_extra={"example": "exemption/errc/approved"}
     )
     assignee: Optional[str] = Field(
         None,
-        description="The person assigned to the next step",
-        example="john.doe@example.com"
+        description="The person assigned to the next step"
     )
     role: Optional[str] = Field(
         None,
-        description="The role of the assignee for the next step",
-        example="Reviewer"
+        description="The role of the assignee for the next step"
     )
     start_date: Optional[str] = Field(
         None,
         alias="startDate",
-        description="The start date for the next step in ISO 8601 format",
-        example="2025-11-01T09:00:00Z"
+        description="The start date for the next step in ISO 8601 format"
     )
     due_date: Optional[str] = Field(
         None,
         alias="dueDate",
-        description="The due date for the next step in ISO 8601 format",
-        example="2025-11-15T18:00:00Z"
+        description="The due date for the next step in ISO 8601 format"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
             "example": {
                 "action": "accept",
                 "path": "exemption/errc/approved",
@@ -372,6 +369,7 @@ class ReportTrackerStatusUpdateRequest(BaseModel):
                 "dueDate": "2025-11-15T18:00:00Z"
             }
         }
+    )
 
 
 class ReportTrackerListResponse(BaseModel):
@@ -385,8 +383,7 @@ class ReportTrackerListResponse(BaseModel):
     id: UUID
     report_id: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReportTrackerResponse(BaseModel):
@@ -416,8 +413,7 @@ class ReportTrackerResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssignUserToStepRequest(BaseModel):
@@ -433,16 +429,16 @@ class AssignUserToStepRequest(BaseModel):
         user_email: Email address of the user
         role: Optional role designation for this assignment
     """
-    report_id: str = Field(..., description="Report ID", example="PR-123")
-    stage_name: str = Field(..., description="Name of the stage", example="Authoring")
-    step_name: str = Field(..., description="Name of the step", example="Initial Draft")
-    user_id: str = Field(..., description="User ID", example="user-123")
-    user_name: str = Field(..., description="User name", example="John Doe")
-    user_email: str = Field(..., description="User email", example="john.doe@example.com")
-    role: Optional[str] = Field(None, description="Role of the user", example="Senior Analyst")
+    report_id: str = Field(..., description="Report ID")
+    stage_name: str = Field(..., description="Name of the stage")
+    step_name: str = Field(..., description="Name of the step")
+    user_id: str = Field(..., description="User ID")
+    user_name: str = Field(..., description="User name")
+    user_email: str = Field(..., description="User email")
+    role: Optional[str] = Field(None, description="Role of the user")
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "report_id": "PR-123",
                 "stage_name": "Authoring",
@@ -453,3 +449,4 @@ class AssignUserToStepRequest(BaseModel):
                 "role": "Senior Analyst"
             }
         }
+    )

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 # Add the server directory to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.main import app
+from app.main import app as fastapi_app
 from app.db.database import Base, get_db
 from app.models.content_product import ContentProduct
 from app.models.report_tracker import ReportTracker
@@ -104,7 +104,7 @@ async def engine():
 @pytest.fixture
 def app():
     """Create a FastAPI application for testing."""
-    return app
+    return fastapi_app
 
 @pytest.fixture
 async def db(engine):
@@ -135,13 +135,13 @@ def client(db):
         finally:
             await db.close()
     
-    app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_db] = override_get_db
     
-    with TestClient(app) as test_client:
+    with TestClient(fastapi_app) as test_client:
         yield test_client
     
     # Clear overrides
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
 
 @pytest.fixture
 async def test_content_products(db):
