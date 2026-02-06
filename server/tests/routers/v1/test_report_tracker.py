@@ -1546,7 +1546,7 @@ class TestFinalDraftUserStory:
         await db.commit()
         await db.refresh(tracker)
 
-        status_before = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        status_before = (await client.get(f"/report-tracker/{tracker.report_id}/status")).json()
         current_before = next(
             (s for s in status_before["progress_tracker"] if s.get("status") == "in_progress"), None
         )
@@ -1554,13 +1554,13 @@ class TestFinalDraftUserStory:
         assert current_before["step_id"] == "initial_draft_001"
         assert current_before["step_name"] == "Assemble Draft"
 
-        response = client.put(
+        response = await client.put(
             f"/report-tracker/{tracker.report_id}",
             json={"action": "accept"},
         )
         assert response.status_code == status.HTTP_200_OK
 
-        status_after = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        status_after = (await client.get(f"/report-tracker/{tracker.report_id}/status")).json()
         current_after = next(
             (s for s in status_after["progress_tracker"] if s.get("status") == "in_progress"), None
         )
@@ -1590,22 +1590,22 @@ class TestFinalDraftUserStory:
         await db.refresh(tracker)
 
         for _ in range(2):
-            client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
+            await client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
 
-        status_before = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        status_before = (await client.get(f"/report-tracker/{tracker.report_id}/status")).json()
         current_before = next(
             (s for s in status_before["progress_tracker"] if s.get("status") == "in_progress"), None
         )
         assert current_before is not None
         assert current_before["step_id"] == "final_draft"
 
-        response = client.put(
+        response = await client.put(
             f"/report-tracker/{tracker.report_id}",
             json={"action": "accept", "path": "skip"},
         )
         assert response.status_code == status.HTTP_200_OK
 
-        status_after = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        status_after = (await client.get(f"/report-tracker/{tracker.report_id}/status")).json()
         current_after = next(
             (s for s in status_after["progress_tracker"] if s.get("status") == "in_progress"), None
         )
@@ -1634,8 +1634,8 @@ class TestFinalDraftUserStory:
         await db.refresh(tracker)
 
         for _ in range(2):
-            client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
-        response = client.put(
+            await client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
+        response = await client.put(
             f"/report-tracker/{tracker.report_id}",
             json={"action": "accept", "path": "nonexistent"},
         )
