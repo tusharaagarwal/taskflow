@@ -55,7 +55,10 @@ class ReportTrackerService:
         # Get CPM record from mock or real API
         from app.services.cpm_client_service import CPMClientService
         
-        print(f"[DEBUG] Fetching CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, cp_name={create_data.content_product_name}")
+        logger.debug(
+            "Fetching CPM record for lob=%s, sub_lob=%s, cp_name=%s",
+            create_data.lob, create_data.sub_lob, create_data.content_product_name,
+        )
         cpm_record = await CPMClientService.get_cpm_by_filters(
             lob=create_data.lob,
             sub_lob=create_data.sub_lob,
@@ -65,16 +68,16 @@ class ReportTrackerService:
         # Extract workflow_id (UUID string) from CPM record
         workflow_id = cpm_record.get("workflow_id")
         if not workflow_id:
-            print(f"[ERROR] No workflow_id in CPM record")
+            logger.error("No workflow_id in CPM record")
             raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, cp_name={create_data.content_product_name}")
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService
-        print(f"[DEBUG] Getting workflow JSON for workflow_id: {workflow_id}")
+        logger.debug("Getting workflow JSON for workflow_id: %s", workflow_id)
         workflow_json = await WorkflowService.get_workflow_json_from_workflow(db, workflow_id)
         
         if not workflow_json:
-            print(f"[ERROR] Workflow not found for workflow_id: {workflow_id}")
+            logger.error("Workflow not found for workflow_id: %s", workflow_id)
             raise ValueError(f"Workflow not found for workflow_id '{workflow_id}'")
         
         # Ensure workflow_json is a dictionary
@@ -82,7 +85,7 @@ class ReportTrackerService:
             try:
                 workflow_json = json.loads(workflow_json)
             except json.JSONDecodeError:
-                print(f"[ERROR] Invalid workflow JSON format: {workflow_json}")
+                logger.error("Invalid workflow JSON format: %s", workflow_json)
                 workflow_json = {}
         
         # Create the tracker with default empty workflow_steps_json
@@ -607,6 +610,14 @@ class ReportTrackerService:
                 break
         
         if next_step_index is not None:
+            for idx in range(current_step_index + 1, next_step_index):
+                skipped_step = steps[idx]
+                skipped_step_json = ReportTrackerService._find_step_in_workflow_json(
+                    workflow_json, skipped_step.get("step_id")
+                )
+                if skipped_step_json and skipped_step_json.get("is_optional"):
+                    skipped_step["status"] = "skipped"
+                    skipped_step["completed_at"] = current_time
             next_step = steps[next_step_index]
             next_step["status"] = "in_progress"
             if not next_step.get("started_at"):
@@ -877,17 +888,17 @@ class ReportTrackerService:
         instance_id = getattr(update_data, "instance_id", None)
         app_data = getattr(update_data, "app_data", None)
         transition_path = getattr(update_data, "path", None)
-        
+
         # Find target step based on instance_id or current in-progress step
         target_step = None
-        
+
         if instance_id:
             # Find step by instance_id
             for step in steps:
                 if step.get("instance_id") == instance_id:
                     target_step = step
                     break
-            
+
             if not target_step:
                 raise UnprocessableEntityException(
                     detail=f"Step with instance_id '{instance_id}' not found in progress tracker"
@@ -898,7 +909,7 @@ class ReportTrackerService:
                 if step.get("status") in ["in_progress", "retry"]:
                     target_step = step
                     break
-        
+
         # If action is provided, we need a valid target step for workflow operations
         if action:
             if not target_step and WorkflowActionType.is_forward_action(action):
@@ -906,7 +917,7 @@ class ReportTrackerService:
                     raise UnprocessableEntityException(
                         detail="All workflow steps are already completed. Cannot restart the workflow."
                     )
-                
+
                 if len(steps) > 0:
                     for step in steps:
                         if step.get("status") == "yet_to_start":
@@ -914,40 +925,40 @@ class ReportTrackerService:
                             step["started_at"] = datetime.now(timezone.utc).isoformat()
                             target_step = step
                             break
-                    
+
                     if not target_step:
                         raise UnprocessableEntityException(
                             detail="No step available to start"
                         )
                 else:
                     raise UnprocessableEntityException(detail="No workflow steps found")
-            
+
             if not target_step:
                 raise UnprocessableEntityException(detail="No step in progress or retry state found")
-        
+
         # If only app_data is provided (no action), we still need a target step
         if not action and app_data is not None:
             if not target_step:
                 raise UnprocessableEntityException(
                     detail="No step in progress or retry state found. Provide instance_id to target a specific step."
                 )
-        
+
         # Update app_data if provided
         if app_data is not None and target_step:
             target_step["app_data"] = app_data
-        
+
         # Perform workflow action if provided
         if action and target_step:
             target_step_id = target_step.get("step_id")
             target_step_json = ReportTrackerService._find_step_in_workflow_json(workflow_json, target_step_id)
-            
+
             if not target_step_json:
                 raise UnprocessableEntityException(detail=f"Step JSON not found for step_id {target_step_id}")
-            
+
             # Validate that the requested action is available for this step
             # Get action_available from the workflow JSON definition (source of truth)
             action_available = target_step_json.get("action_available", [])
-            
+
             # If action_available list is defined and not empty, validate the action
             # If action_available is empty list or missing, allow all configured actions (backward compatibility)
             if action_available and len(action_available) > 0:
@@ -957,7 +968,7 @@ class ReportTrackerService:
                                f"Available actions: {', '.join(action_available)}"
                     )
             # If action_available is empty list or missing, allow all actions (no validation needed)
-            
+
             # Handle special actions (no-op for now)
             if WorkflowActionType.is_special_action(action):
                 logger.info(f"Special action '{action}' executed (no-op) for step '{target_step_id}'")
@@ -971,7 +982,7 @@ class ReportTrackerService:
                 )
             else:
                 raise UnprocessableEntityException(detail=f"Invalid action: {action}")
-            
+
         tracker.workflow_steps_json = {"progress_tracker": steps}
         flag_modified(tracker, "workflow_steps_json")
         await db.commit()

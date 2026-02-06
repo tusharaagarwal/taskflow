@@ -1338,3 +1338,219 @@ class TestActionValidation:
 
         # Should succeed
         assert response.status_code == status.HTTP_200_OK
+
+
+# Workflow with Assemble Draft then Initial Draft (for assembly -> Initial Draft test)
+WORKFLOW_ASSEMBLY_TO_INITIAL = {
+    "steps": [
+        {
+            "step_id": "initial_draft_001",
+            "step_name": "Assemble Draft",
+            "stage_name": "Authoring",
+            "actor": {"role": "NA", "type": "agent"},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve"],
+            "transitions": {"success_goto": "initial_draft_002", "fail_goto": "NA"},
+        },
+        {
+            "step_id": "initial_draft_002",
+            "step_name": "Initial Draft",
+            "stage_name": "Authoring",
+            "actor": {"role": "gcc_associate", "type": "human"},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
+            "transitions": {"success_goto": "final_draft", "fail_goto": "initial_draft_001"},
+        },
+        {
+            "step_id": "final_draft",
+            "step_name": "Final Draft",
+            "stage_name": "Content Assembly",
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
+            "transitions": {"success_goto": "NA", "fail_goto": "initial_draft_002"},
+        },
+    ]
+}
+
+# Workflow with optional Copy Edit (path=skip goes to finalize_report_pre_approval)
+WORKFLOW_OPTIONAL_COPY_EDIT = {
+    "steps": [
+        {
+            "step_id": "initial_draft_001",
+            "step_name": "Assemble Draft",
+            "stage_name": "Authoring",
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve"],
+            "transitions": {"success_goto": "initial_draft_002", "fail_goto": "NA"},
+        },
+        {
+            "step_id": "initial_draft_002",
+            "step_name": "Initial Draft",
+            "stage_name": "Authoring",
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
+            "transitions": {"success_goto": "final_draft", "fail_goto": "initial_draft_001"},
+        },
+        {
+            "step_id": "final_draft",
+            "step_name": "Final Draft",
+            "stage_name": "Content Assembly",
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
+            "transitions": {
+                "success_goto": {"default": "copy_editing", "skip": "finalize_report_pre_approval"},
+                "fail_goto": "initial_draft_002",
+            },
+        },
+        {
+            "step_id": "copy_editing",
+            "step_name": "Copy Editing",
+            "stage_name": "Editing",
+            "actor": {"role": "copy_editor"},
+            "is_optional": True,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve", "reject", "push_back", "pull_back"],
+            "transitions": {"success_goto": "finalize_report_pre_approval", "fail_goto": "final_draft"},
+        },
+        {
+            "step_id": "finalize_report_pre_approval",
+            "step_name": "Finalize Report",
+            "stage_name": "Finalization",
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve"],
+            "transitions": {"success_goto": "NA", "fail_goto": "copy_editing"},
+        },
+    ]
+}
+
+
+class TestFinalDraftUserStory:
+    """Tests for Final Draft user story: assembly -> Initial Draft, optional Copy Edit skip, validation."""
+
+    @pytest.mark.asyncio
+    async def test_assembly_to_initial_draft_transition(self, client, db):
+        """After completing Assemble Draft (accept), current step is Initial Draft."""
+        await _create_test_content_products(db)
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_ASSEMBLY_TO_INITIAL)
+        tracker = ReportTracker(
+            report_id="PR-assembly-initial",
+            workflow_json=WORKFLOW_ASSEMBLY_TO_INITIAL,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        status_before = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        current_before = next(
+            (s for s in status_before["progress_tracker"] if s.get("status") == "in_progress"), None
+        )
+        assert current_before is not None
+        assert current_before["step_id"] == "initial_draft_001"
+        assert current_before["step_name"] == "Assemble Draft"
+
+        response = client.put(
+            f"/report-tracker/{tracker.report_id}",
+            json={"action": "accept"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        status_after = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        current_after = next(
+            (s for s in status_after["progress_tracker"] if s.get("status") == "in_progress"), None
+        )
+        assert current_after is not None
+        assert current_after["step_id"] == "initial_draft_002"
+        assert current_after["step_name"] == "Initial Draft"
+        completed_assemble = next(
+            (s for s in status_after["progress_tracker"] if s.get("step_id") == "initial_draft_001"), None
+        )
+        assert completed_assemble is not None
+        assert completed_assemble["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_optional_copy_edit_skip(self, client, db):
+        """With path=skip on Final Draft, transition skips Copy Editing to Finalize Report."""
+        await _create_test_content_products(db)
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_OPTIONAL_COPY_EDIT)
+        tracker = ReportTracker(
+            report_id="PR-optional-copy-skip",
+            workflow_json=WORKFLOW_OPTIONAL_COPY_EDIT,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        for _ in range(2):
+            client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
+
+        status_before = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        current_before = next(
+            (s for s in status_before["progress_tracker"] if s.get("status") == "in_progress"), None
+        )
+        assert current_before is not None
+        assert current_before["step_id"] == "final_draft"
+
+        response = client.put(
+            f"/report-tracker/{tracker.report_id}",
+            json={"action": "accept", "path": "skip"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+
+        status_after = client.get(f"/report-tracker/{tracker.report_id}/status").json()
+        current_after = next(
+            (s for s in status_after["progress_tracker"] if s.get("status") == "in_progress"), None
+        )
+        assert current_after is not None
+        assert current_after["step_id"] == "finalize_report_pre_approval"
+        copy_edit_step = next(
+            (s for s in status_after["progress_tracker"] if s.get("step_id") == "copy_editing"), None
+        )
+        assert copy_edit_step is not None
+        assert copy_edit_step["status"] == "skipped"
+
+    @pytest.mark.asyncio
+    async def test_invalid_path_returns_422(self, client, db):
+        """Invalid path (e.g. path=nonexistent when workflow has no such key) returns 422."""
+        await _create_test_content_products(db)
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_OPTIONAL_COPY_EDIT)
+        tracker = ReportTracker(
+            report_id="PR-invalid-path",
+            workflow_json=WORKFLOW_OPTIONAL_COPY_EDIT,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+
+        for _ in range(2):
+            client.put(f"/report-tracker/{tracker.report_id}", json={"action": "accept"})
+        response = client.put(
+            f"/report-tracker/{tracker.report_id}",
+            json={"action": "accept", "path": "nonexistent"},
+        )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        detail = response.json().get("detail") or ""
+        if isinstance(detail, list):
+            detail = " ".join(str(d) for d in detail)
+        detail = str(detail).lower()
+        assert "path" in detail or "invalid" in detail
