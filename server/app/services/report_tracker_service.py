@@ -12,6 +12,7 @@ from app.models.report_tracker import ReportTracker
 from app.models.content_product import ContentProduct
 from app.schemas.report_tracker import ReportTrackerCreateRequest
 from app.constants import WorkflowActionType
+from app.utils.security import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +49,11 @@ class ReportTrackerService:
         
         try:
             report_id = await ReportTrackerService._generate_unique_report_id(db, create_data.document_type)
-            logger.info(f"Generated report_id '{report_id}' for document_type '{create_data.document_type}'")
+            s_doc_type = sanitize_log_input(create_data.document_type)
+            logger.info(f"Generated report_id '{report_id}' for document_type '{s_doc_type}'")
         except Exception as e:
-            logger.error(f"Failed to generate report_id from document_type '{create_data.document_type}': {e}")
+            s_doc_type = sanitize_log_input(create_data.document_type)
+            logger.error(f"Failed to generate report_id from document_type '{s_doc_type}': {e}")
             raise ValueError(f"Failed to generate report_id: {e}")
 
 
@@ -65,7 +68,10 @@ class ReportTrackerService:
         # Get CPM record from mock or real API using content_type as cp_name
         from app.services.cpm_client_service import CPMClientService
         
-        logger.debug(f"Fetching CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
+        s_lob = sanitize_log_input(create_data.lob)
+        s_sub_lob = sanitize_log_input(create_data.sub_lob)
+        s_content_type = sanitize_log_input(create_data.content_type)
+        logger.debug(f"Fetching CPM record for lob={s_lob}, sub_lob={s_sub_lob}, content_type={s_content_type}")
         cpm_record = await CPMClientService.get_cpm_by_filters(
             lob=create_data.lob,
             sub_lob=create_data.sub_lob,

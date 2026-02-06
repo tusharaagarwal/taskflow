@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.abbreviation import DocumentTypeAbbreviation
+from app.utils.security import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -336,11 +337,11 @@ class AbbreviationService:
         # Try cache first
         cached_value = self._cache.get(cache_key)
         if cached_value is not None:
-            logger.debug(f"Cache hit for document type: {normalized_type}")
+            logger.debug(f"Cache hit for document type: {sanitize_log_input(normalized_type)}")
             return cached_value
         
         # Cache miss - query database
-        logger.debug(f"Cache miss for document type: {normalized_type}")
+        logger.debug(f"Cache miss for document type: {sanitize_log_input(normalized_type)}")
         
         try:
             abbreviation = await self._fetch_from_database(db, normalized_type)
@@ -356,8 +357,9 @@ class AbbreviationService:
         except ValueError:
             raise
         except Exception as e:
-            logger.error(f"Database error fetching abbreviation for '{normalized_type}': {e}")
-            raise ValueError(f"Failed to fetch abbreviation for '{normalized_type}': {e}")
+            s_type = sanitize_log_input(normalized_type)
+            logger.error(f"Database error fetching abbreviation for '{s_type}': {e}")
+            raise ValueError(f"Failed to fetch abbreviation for '{s_type}': {e}")
     
     async def _fetch_from_database(
         self,
@@ -395,18 +397,19 @@ class AbbreviationService:
         """
         # Check fallback mappings
         fallback_abbreviations = self._config.get("fallback_abbreviations", {})
+        s_doc_type = sanitize_log_input(document_type)
         if document_type in fallback_abbreviations:
             fallback = fallback_abbreviations[document_type]
-            logger.warning(f"Using fallback abbreviation for '{document_type}': {fallback}")
+            logger.warning(f"Using fallback abbreviation for '{s_doc_type}': {fallback}")
             return fallback
         
         # Raise or return default
         if self._config.get("raise_on_not_found", True):
-            raise ValueError(f"Abbreviation not found for document type: '{document_type}'")
+            raise ValueError(f"Abbreviation not found for document type: '{s_doc_type}'")
         
         default_abbreviation = self._config.get("default_abbreviation", "DOC")
         logger.warning(
-            f"Abbreviation not found for '{document_type}', using default: {default_abbreviation}"
+            f"Abbreviation not found for '{s_doc_type}', using default: {default_abbreviation}"
         )
         return default_abbreviation
     
@@ -467,7 +470,7 @@ class AbbreviationService:
             cache_key = f"abbr:{normalized_type}"
             count = self._cache.invalidate(cache_key)
             if count > 0:
-                logger.info(f"Invalidated cache for document type: {normalized_type}")
+                logger.info(f"Invalidated cache for document type: {sanitize_log_input(normalized_type)}")
             return count
     
     def get_cache_stats(self) -> Dict[str, Any]:
