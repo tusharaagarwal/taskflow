@@ -43,6 +43,7 @@ from dotenv import load_dotenv
 # Add the server directory to the Python path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '.'))
 from app.constants import WorkflowActionType
+from app.utils.security import sanitize_log_input
 
 # ============================================================
 # Configuration
@@ -115,8 +116,8 @@ file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(m
 file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
 
-logger.info(f"=== API Agent Session Started ===")
-logger.info(f"Log file: {LOG_FILENAME}")
+logger.info("=== API Agent Session Started ===")
+logger.info(f"Log file: {sanitize_log_input(str(LOG_FILENAME))}")
 
 
 # ============================================================
@@ -143,12 +144,12 @@ def send_alert(alert_type: str, message: str, details: dict = None) -> dict:
     }
     
     logger.warning("="*60)
-    logger.warning(f"🚨 ALERT TRIGGERED: {alert_type}")
-    logger.warning(f"   Message: {message}")
-    logger.warning(f"   Alert ID: {alert_data['alert_id']}")
-    logger.warning(f"   Severity: {alert_data['severity']}")
+    logger.warning(f"🚨 ALERT TRIGGERED: {sanitize_log_input(alert_type)}")
+    logger.warning(f"   Message: {sanitize_log_input(message)}")
+    logger.warning(f"   Alert ID: {sanitize_log_input(alert_data['alert_id'])}")
+    logger.warning(f"   Severity: {sanitize_log_input(alert_data['severity'])}")
     if details:
-        logger.warning(f"   Details: {json.dumps(details, indent=2)}")
+        logger.warning(f"   Details: {sanitize_log_input(json.dumps(details, indent=2))}")
     logger.warning("="*60)
     
     # In production, you would send this to your alerting system
@@ -187,7 +188,7 @@ def api_call_with_retry(
     
     for attempt in range(1, max_retries + 1):
         try:
-            logger.info(f"[RETRY] Attempt {attempt}/{max_retries} for {operation_name}")
+            logger.info(f"[RETRY] Attempt {attempt}/{max_retries} for {sanitize_log_input(operation_name)}")
             result = func(*args, **kwargs)
             
             # Check if result indicates success
@@ -200,15 +201,15 @@ def api_call_with_retry(
                     # Business logic error, don't retry
                     return result
             
-            logger.info(f"[RETRY] {operation_name} succeeded on attempt {attempt}")
+            logger.info(f"[RETRY] {sanitize_log_input(operation_name)} succeeded on attempt {attempt}")
             return result
             
         except httpx.ConnectError as e:
             last_exception = e
-            logger.warning(f"[RETRY] Connection error on attempt {attempt}: {e}")
+            logger.warning(f"[RETRY] Connection error on attempt {attempt}: {sanitize_log_input(str(e))}")
         except httpx.TimeoutException as e:
             last_exception = e
-            logger.warning(f"[RETRY] Timeout on attempt {attempt}: {e}")
+            logger.warning(f"[RETRY] Timeout on attempt {attempt}: {sanitize_log_input(str(e))}")
         except httpx.HTTPStatusError as e:
             # Only retry on 5xx errors (server errors)
             if e.response.status_code >= 500:
@@ -220,7 +221,7 @@ def api_call_with_retry(
                 raise
         except Exception as e:
             last_exception = e
-            logger.warning(f"[RETRY] Error on attempt {attempt}: {e}")
+            logger.warning(f"[RETRY] Error on attempt {attempt}: {sanitize_log_input(str(e))}")
         
         if attempt < max_retries:
             logger.info(f"[RETRY] Waiting {retry_delay}s before retry...")
@@ -406,7 +407,7 @@ def create_report_tracker(report_id: str, content_product_name: str) -> dict:
     
     Use this when the user wants to create/start a new report or workflow.
     """
-    logger.info(f"[API] Creating report tracker: {report_id}, content_product: {content_product_name}")
+    logger.info(f"[API] Creating report tracker: {sanitize_log_input(report_id)}, content_product: {sanitize_log_input(content_product_name)}")
     
     if USE_MOCK_MODE:
         return {
@@ -441,7 +442,7 @@ def get_report_tracker(report_id: str) -> dict:
     
     Use this when the user wants to see details of a specific report.
     """
-    logger.info(f"[API] Getting report tracker: {report_id}")
+    logger.info(f"[API] Getting report tracker: {sanitize_log_input(report_id)}")
     
     if USE_MOCK_MODE:
         return {
@@ -487,7 +488,7 @@ def get_report_status(report_id: str) -> dict:
             "status": "error",
             "message": "Invalid Report ID. Please provide the specific ID (e.g., RPT-20251027...)"
         }
-    logger.info(f"[API] Getting report status: {report_id}")
+    logger.info(f"[API] Getting report status: {sanitize_log_input(report_id)}")
     
     if USE_MOCK_MODE:
         return {
@@ -532,7 +533,7 @@ def update_report_tracker(report_id: str, action: str) -> dict:
     
     Use this when the user wants to approve/submit or reject/return a report step.
     """
-    logger.info(f"[API] Updating report tracker: {report_id}, action: {action}")
+    logger.info(f"[API] Updating report tracker: {sanitize_log_input(report_id)}, action: {sanitize_log_input(action)}")
     
     # Validate action
     action_lower = action.lower().strip()
@@ -594,7 +595,7 @@ def assign_user_to_step(
     
     Use this when the user wants to assign someone to a workflow step.
     """
-    logger.info(f"[API] Assigning user to step: {report_id}, {stage_name}/{step_name}, user: {user_email}")
+    logger.info(f"[API] Assigning user to step: {sanitize_log_input(report_id)}, {sanitize_log_input(stage_name)}/{sanitize_log_input(step_name)}, user: {sanitize_log_input(user_email)}")
     
     if USE_MOCK_MODE:
         return {
@@ -861,7 +862,7 @@ def run_agent(user_input: str) -> dict:
                     tool_args = tool_call['args']
                     tool_call_id = tool_call['id']
                     
-                    logger.info(f"[AGENT] Calling tool: {tool_name} with args: {tool_args}")
+                    logger.info(f"[AGENT] Calling tool: {sanitize_log_input(tool_name)} with args: {sanitize_log_input(json.dumps(tool_args, default=str))}")
                     
                     # Execute the appropriate tool
                     tool_map = {
@@ -904,7 +905,7 @@ def run_agent(user_input: str) -> dict:
         }
     
     except Exception as e:
-        logger.error(f"Agent error: {e}")
+        logger.error(f"Agent error: {sanitize_log_input(str(e))}")
         # Fall back to rule-based
         return run_agent_rule_based(user_input)
 
@@ -952,12 +953,12 @@ def main():
                 break
             
             # Log user input
-            logger.info(f"User input: {user_input}")
+            logger.info(f"User input: {sanitize_log_input(user_input)}")
             
             result = run_agent(user_input)
             
             # Log agent response
-            logger.info(f"Agent response: {json.dumps(result, default=str)}")
+            logger.info(f"Agent response: {sanitize_log_input(json.dumps(result, default=str))}")
             
             print(f"\nAgent: {json.dumps(result, indent=2, default=str)}\n")
             
@@ -966,7 +967,7 @@ def main():
             print(f"\nGoodbye! Log saved to: {LOG_FILENAME}")
             break
         except Exception as e:
-            logger.error(f"Error in main loop: {e}")
+            logger.error(f"Error in main loop: {sanitize_log_input(str(e))}")
             print(f"\nError: {e}\n")
 
 
