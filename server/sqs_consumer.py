@@ -13,6 +13,8 @@ import time
 import logging
 from pathlib import Path
 
+from app.utils.security import sanitize_log_input
+
 logger = logging.getLogger("sqs_consumer")
 
 
@@ -35,10 +37,10 @@ def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
             with open(config_path, 'r') as f:
                 return json.load(f)
         else:
-            logger.warning(f"⚠ Config file not found: {config_path}")
+            logger.warning(f"⚠ Config file not found: {sanitize_log_input(str(config_path))}")
             return {}
     except Exception as e:
-        logger.warning(f"⚠ Error loading config file: {str(e)}")
+        logger.warning(f"⚠ Error loading config file: {sanitize_log_input(str(e))}")
         return {}
 
 
@@ -90,7 +92,7 @@ class SQSMessageConsumer:
             'deleted': 0
         }
         
-        logger.info(f"✅ SQS Consumer initialized for region: {region}")
+        logger.info(f"✅ SQS Consumer initialized for region: {sanitize_log_input(region)}")
     
     def stop(self):
         """Stop the consumer gracefully"""
@@ -122,7 +124,7 @@ class SQSMessageConsumer:
                 response = self.sqs_client.get_queue_url(QueueName=queue_name)
                 queue_url = response['QueueUrl']
             except Exception as e:
-                logger.error(f"✗ Error getting queue URL: {str(e)}")
+                logger.error(f"✗ Error getting queue URL: {sanitize_log_input(str(e))}")
                 return []
             
             # Receive messages
@@ -141,7 +143,7 @@ class SQSMessageConsumer:
             return messages
             
         except Exception as e:
-            logger.error(f"✗ Error receiving messages from queue '{queue_name}': {str(e)}")
+            logger.error(f"✗ Error receiving messages from queue '{sanitize_log_input(queue_name)}': {sanitize_log_input(str(e))}")
             return []
     
     def extract_message_content(self, message: Dict[str, Any]) -> str:
@@ -193,13 +195,14 @@ class SQSMessageConsumer:
             message_id = message.get('MessageId', 'unknown')
             content = self.extract_message_content(message)
             
-            logger.info(f"📨 Processing message (ID: {message_id})")
-            logger.info(f"   Content: {content[:200]}..." if len(content) > 200 else f"   Content: {content}")
+            sanitized_content = sanitize_log_input(content)
+            logger.info(f"📨 Processing message (ID: {sanitize_log_input(str(message_id))})")
+            logger.info(f"   Content: {sanitized_content[:200]}..." if len(sanitized_content) > 200 else f"   Content: {sanitized_content}")
             
             # Process through agent if handler is available
             if self.message_handler:
                 result = self.message_handler(content)
-                logger.info(f"   Agent Response: {json.dumps(result, default=str)[:500]}")
+                logger.info(f"   Agent Response: {sanitize_log_input(json.dumps(result, default=str))[:500]}")
             else:
                 logger.warning("   No message handler configured - message logged but not processed")
             
@@ -207,7 +210,7 @@ class SQSMessageConsumer:
             return True
             
         except Exception as e:
-            logger.error(f"✗ Error processing message: {str(e)}")
+            logger.error(f"✗ Error processing message: {sanitize_log_input(str(e))}")
             self.stats['failed'] += 1
             return False
     
@@ -228,7 +231,7 @@ class SQSMessageConsumer:
                 response = self.sqs_client.get_queue_url(QueueName=queue_name)
                 queue_url = response['QueueUrl']
             except Exception as e:
-                logger.error(f"✗ Error getting queue URL: {str(e)}")
+                logger.error(f"✗ Error getting queue URL: {sanitize_log_input(str(e))}")
                 return False
             
             self.sqs_client.delete_message(
@@ -240,7 +243,7 @@ class SQSMessageConsumer:
             return True
             
         except Exception as e:
-            logger.error(f"✗ Error deleting message: {str(e)}")
+            logger.error(f"✗ Error deleting message: {sanitize_log_input(str(e))}")
             return False
     
     def consume_continuously(
@@ -261,7 +264,7 @@ class SQSMessageConsumer:
             wait_time_seconds: Long polling wait time
             poll_interval: Interval between polls (seconds)
         """
-        logger.info(f"🔄 Starting continuous consumption from queue: {queue_name}")
+        logger.info(f"🔄 Starting continuous consumption from queue: {sanitize_log_input(queue_name)}")
         logger.info(f"   Auto-delete: {auto_delete}")
         logger.info(f"   Max messages per poll: {max_messages}")
         logger.info(f"   Long polling wait time: {wait_time_seconds}s")
@@ -300,7 +303,7 @@ class SQSMessageConsumer:
                 self.running = False
                 break
             except Exception as e:
-                logger.error(f"✗ Error in consumption loop: {str(e)}")
+                logger.error(f"✗ Error in consumption loop: {sanitize_log_input(str(e))}")
                 time.sleep(poll_interval)
     
     def get_stats(self) -> Dict[str, int]:

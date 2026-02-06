@@ -50,10 +50,10 @@ class ReportTrackerService:
         try:
             report_id = await ReportTrackerService._generate_unique_report_id(db, create_data.document_type)
             s_doc_type = sanitize_log_input(create_data.document_type)
-            logger.info(f"Generated report_id '{report_id}' for document_type '{s_doc_type}'")
+            logger.info(f"Generated report_id '{sanitize_log_input(report_id)}' for document_type '{s_doc_type}'")
         except Exception as e:
             s_doc_type = sanitize_log_input(create_data.document_type)
-            logger.error(f"Failed to generate report_id from document_type '{s_doc_type}': {e}")
+            logger.error(f"Failed to generate report_id from document_type '{s_doc_type}': {sanitize_log_input(str(e))}")
             raise ValueError(f"Failed to generate report_id: {e}")
 
 
@@ -88,11 +88,11 @@ class ReportTrackerService:
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService
-        logger.debug(f"Getting workflow JSON for workflow_id: {workflow_id}")
+        logger.debug(f"Getting workflow JSON for workflow_id: {sanitize_log_input(str(workflow_id))}")
         workflow_json = await WorkflowService.get_workflow_json_from_workflow(db, workflow_id)
         
         if not workflow_json:
-            logger.error(f"Workflow not found for workflow_id: {workflow_id}")
+            logger.error(f"Workflow not found for workflow_id: {sanitize_log_input(str(workflow_id))}")
             raise ValueError(f"Workflow not found for workflow_id '{workflow_id}'")
         
         # Ensure workflow_json is a dictionary
@@ -100,7 +100,7 @@ class ReportTrackerService:
             try:
                 workflow_json = json.loads(workflow_json)
             except json.JSONDecodeError:
-                logger.error(f"Invalid workflow JSON format: {workflow_json}")
+                logger.error(f"Invalid workflow JSON format: {sanitize_log_input(str(workflow_json))}")
                 workflow_json = {}
         
         # Create the tracker with all new fields
@@ -1019,7 +1019,7 @@ class ReportTrackerService:
 
             # Handle special actions (no-op for now)
             if WorkflowActionType.is_special_action(action):
-                logger.info(f"Special action '{action}' executed (no-op) for step '{target_step_id}'")
+                logger.info(f"Special action '{sanitize_log_input(action)}' executed (no-op) for step '{sanitize_log_input(target_step_id)}'")
             elif WorkflowActionType.is_forward_action(action):
                 ReportTrackerService._accept(
                     tracker, steps, target_step, target_step_json, workflow_json, transition_path
