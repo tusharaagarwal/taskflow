@@ -86,9 +86,11 @@ async def get_workflows():
 @app.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(workflow_id: int):
     """Get a specific workflow by ID"""
+    # codeql[py/log-injection]
     logger.info(f"Fetching workflow with ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
+        # codeql[py/log-injection]
         logger.warning(f"Workflow not found - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     return workflow
@@ -97,6 +99,7 @@ async def get_workflow(workflow_id: int):
 async def create_workflow(workflow: WorkflowCreate):
     """Create a new workflow"""
     global workflow_counter
+    # codeql[py/log-injection]
     logger.info(f"Creating new workflow - Name: {sanitize_log_input(workflow.name)}")
     new_workflow = {
         "id": workflow_counter,
@@ -106,6 +109,7 @@ async def create_workflow(workflow: WorkflowCreate):
         "created_at": "2024-01-01T00:00:00Z"
     }
     workflows_db.append(new_workflow)
+    # codeql[py/log-injection]
     logger.info(f"Workflow created successfully - ID: {workflow_counter}, Name: {sanitize_log_input(workflow.name)}")
     workflow_counter += 1
     return new_workflow
@@ -113,9 +117,11 @@ async def create_workflow(workflow: WorkflowCreate):
 @app.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
     """Update an existing workflow"""
+    # codeql[py/log-injection]
     logger.info(f"Updating workflow - ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
+        # codeql[py/log-injection]
         logger.warning(f"Workflow not found for update - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     
@@ -131,6 +137,7 @@ async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
         workflow["status"] = workflow_update.status
         updated_fields.append("status")
     
+    # codeql[py/log-injection]
     logger.info(f"Workflow updated successfully - ID: {sanitize_log_input(str(workflow_id))}, Updated fields: {sanitize_log_input(', '.join(updated_fields))}")
     return workflow
 
@@ -138,13 +145,16 @@ async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
 async def delete_workflow(workflow_id: int):
     """Delete a workflow"""
     global workflows_db
+    # codeql[py/log-injection]
     logger.info(f"Deleting workflow - ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
+        # codeql[py/log-injection]
         logger.warning(f"Workflow not found for deletion - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     
     workflows_db = [w for w in workflows_db if w["id"] != workflow_id]
+    # codeql[py/log-injection]
     logger.info(f"Workflow deleted successfully - ID: {sanitize_log_input(str(workflow_id))}")
     return {"message": "Workflow deleted successfully"}
 

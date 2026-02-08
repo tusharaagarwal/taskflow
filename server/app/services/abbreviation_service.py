@@ -140,6 +140,7 @@ class TTLCache:
                 return entry.value
                 
         except Exception as e:
+            # codeql[py/log-injection]
             logger.warning(f"Cache get error for key '{sanitize_log_input(key)}': {sanitize_log_input(str(e))}")
             self._stats.errors += 1
             return None
@@ -167,6 +168,7 @@ class TTLCache:
                 )
                 
         except Exception as e:
+            # codeql[py/log-injection]
             logger.warning(f"Cache set error for key '{sanitize_log_input(key)}': {sanitize_log_input(str(e))}")
             self._stats.errors += 1
     
@@ -193,11 +195,13 @@ class TTLCache:
                     if key in self._cache:
                         del self._cache[key]
                         self._stats.invalidations += 1
+                        # codeql[py/log-injection]
                         logger.info(f"Cache invalidated: removed key '{sanitize_log_input(key)}'")
                         return 1
                     return 0
                     
         except Exception as e:
+            # codeql[py/log-injection]
             logger.warning(f"Cache invalidation error: {sanitize_log_input(str(e))}")
             self._stats.errors += 1
             return 0
@@ -215,6 +219,7 @@ class TTLCache:
         
         del self._cache[lru_key]
         self._stats.evictions += 1
+        # codeql[py/log-injection]
         logger.debug(f"Cache evicted LRU entry: '{sanitize_log_input(lru_key)}'")
     
     def cleanup_expired(self) -> int:
@@ -240,6 +245,7 @@ class TTLCache:
                 return len(expired_keys)
                 
         except Exception as e:
+            # codeql[py/log-injection]
             logger.warning(f"Cache cleanup error: {sanitize_log_input(str(e))}")
             self._stats.errors += 1
             return 0
@@ -337,10 +343,12 @@ class AbbreviationService:
         # Try cache first
         cached_value = self._cache.get(cache_key)
         if cached_value is not None:
+            # codeql[py/log-injection]
             logger.debug(f"Cache hit for document type: {sanitize_log_input(normalized_type)}")
             return cached_value
         
         # Cache miss - query database
+        # codeql[py/log-injection]
         logger.debug(f"Cache miss for document type: {sanitize_log_input(normalized_type)}")
         
         try:
@@ -358,6 +366,7 @@ class AbbreviationService:
             raise
         except Exception as e:
             s_type = sanitize_log_input(normalized_type)
+            # codeql[py/log-injection]
             logger.error(f"Database error fetching abbreviation for '{s_type}': {sanitize_log_input(str(e))}")
             raise ValueError(f"Failed to fetch abbreviation for '{s_type}': {e}")
     
@@ -400,6 +409,7 @@ class AbbreviationService:
         s_doc_type = sanitize_log_input(document_type)
         if document_type in fallback_abbreviations:
             fallback = fallback_abbreviations[document_type]
+            # codeql[py/log-injection]
             logger.warning(f"Using fallback abbreviation for '{s_doc_type}': {sanitize_log_input(str(fallback))}")
             return fallback
         
@@ -408,6 +418,7 @@ class AbbreviationService:
             raise ValueError(f"Abbreviation not found for document type: '{s_doc_type}'")
         
         default_abbreviation = self._config.get("default_abbreviation", "DOC")
+        # codeql[py/log-injection]
         logger.warning(
             f"Abbreviation not found for '{s_doc_type}', using default: {sanitize_log_input(str(default_abbreviation))}"
         )
@@ -439,6 +450,7 @@ class AbbreviationService:
             return [abbr.to_dict() for abbr in abbreviations]
             
         except Exception as e:
+            # codeql[py/log-injection]
             logger.error(f"Database error fetching all abbreviations: {sanitize_log_input(str(e))}")
             raise ValueError(f"Failed to fetch abbreviations: {e}")
     
@@ -470,6 +482,7 @@ class AbbreviationService:
             cache_key = f"abbr:{normalized_type}"
             count = self._cache.invalidate(cache_key)
             if count > 0:
+                # codeql[py/log-injection]
                 logger.info(f"Invalidated cache for document type: {sanitize_log_input(normalized_type)}")
             return count
     
