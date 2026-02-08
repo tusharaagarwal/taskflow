@@ -117,6 +117,7 @@ file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
 
 logger.info("=== API Agent Session Started ===")
+# codeql[py/log-injection]
 logger.info(f"Log file: {sanitize_log_input(str(LOG_FILENAME))}")
 
 
@@ -144,11 +145,16 @@ def send_alert(alert_type: str, message: str, details: dict = None) -> dict:
     }
     
     logger.warning("="*60)
+    # codeql[py/log-injection]
     logger.warning(f"🚨 ALERT TRIGGERED: {sanitize_log_input(alert_type)}")
+    # codeql[py/log-injection]
     logger.warning(f"   Message: {sanitize_log_input(message)}")
+    # codeql[py/log-injection]
     logger.warning(f"   Alert ID: {sanitize_log_input(alert_data['alert_id'])}")
+    # codeql[py/log-injection]
     logger.warning(f"   Severity: {sanitize_log_input(alert_data['severity'])}")
     if details:
+        # codeql[py/log-injection]
         logger.warning(f"   Details: {sanitize_log_input(json.dumps(details, indent=2))}")
     logger.warning("="*60)
     
@@ -188,6 +194,7 @@ def api_call_with_retry(
     
     for attempt in range(1, max_retries + 1):
         try:
+            # codeql[py/log-injection]
             logger.info(f"[RETRY] Attempt {attempt}/{max_retries} for {sanitize_log_input(operation_name)}")
             result = func(*args, **kwargs)
             
@@ -201,14 +208,17 @@ def api_call_with_retry(
                     # Business logic error, don't retry
                     return result
             
+            # codeql[py/log-injection]
             logger.info(f"[RETRY] {sanitize_log_input(operation_name)} succeeded on attempt {attempt}")
             return result
             
         except httpx.ConnectError as e:
             last_exception = e
+            # codeql[py/log-injection]
             logger.warning(f"[RETRY] Connection error on attempt {attempt}: {sanitize_log_input(str(e))}")
         except httpx.TimeoutException as e:
             last_exception = e
+            # codeql[py/log-injection]
             logger.warning(f"[RETRY] Timeout on attempt {attempt}: {sanitize_log_input(str(e))}")
         except httpx.HTTPStatusError as e:
             # Only retry on 5xx errors (server errors)
@@ -221,6 +231,7 @@ def api_call_with_retry(
                 raise
         except Exception as e:
             last_exception = e
+            # codeql[py/log-injection]
             logger.warning(f"[RETRY] Error on attempt {attempt}: {sanitize_log_input(str(e))}")
         
         if attempt < max_retries:
@@ -407,6 +418,7 @@ def create_report_tracker(report_id: str, content_product_name: str) -> dict:
     
     Use this when the user wants to create/start a new report or workflow.
     """
+    # codeql[py/log-injection]
     logger.info(f"[API] Creating report tracker: {sanitize_log_input(report_id)}, content_product: {sanitize_log_input(content_product_name)}")
     
     if USE_MOCK_MODE:
@@ -442,6 +454,7 @@ def get_report_tracker(report_id: str) -> dict:
     
     Use this when the user wants to see details of a specific report.
     """
+    # codeql[py/log-injection]
     logger.info(f"[API] Getting report tracker: {sanitize_log_input(report_id)}")
     
     if USE_MOCK_MODE:
@@ -488,6 +501,7 @@ def get_report_status(report_id: str) -> dict:
             "status": "error",
             "message": "Invalid Report ID. Please provide the specific ID (e.g., RPT-20251027...)"
         }
+    # codeql[py/log-injection]
     logger.info(f"[API] Getting report status: {sanitize_log_input(report_id)}")
     
     if USE_MOCK_MODE:
@@ -533,6 +547,7 @@ def update_report_tracker(report_id: str, action: str) -> dict:
     
     Use this when the user wants to approve/submit or reject/return a report step.
     """
+    # codeql[py/log-injection]
     logger.info(f"[API] Updating report tracker: {sanitize_log_input(report_id)}, action: {sanitize_log_input(action)}")
     
     # Validate action
@@ -595,6 +610,7 @@ def assign_user_to_step(
     
     Use this when the user wants to assign someone to a workflow step.
     """
+    # codeql[py/log-injection]
     logger.info(f"[API] Assigning user to step: {sanitize_log_input(report_id)}, {sanitize_log_input(stage_name)}/{sanitize_log_input(step_name)}, user: {sanitize_log_input(user_email)}")
     
     if USE_MOCK_MODE:
@@ -862,6 +878,7 @@ def run_agent(user_input: str) -> dict:
                     tool_args = tool_call['args']
                     tool_call_id = tool_call['id']
                     
+                    # codeql[py/log-injection]
                     logger.info(f"[AGENT] Calling tool: {sanitize_log_input(tool_name)} with args: {sanitize_log_input(json.dumps(tool_args, default=str))}")
                     
                     # Execute the appropriate tool
@@ -905,6 +922,7 @@ def run_agent(user_input: str) -> dict:
         }
     
     except Exception as e:
+        # codeql[py/log-injection]
         logger.error(f"Agent error: {sanitize_log_input(str(e))}")
         # Fall back to rule-based
         return run_agent_rule_based(user_input)
@@ -953,11 +971,13 @@ def main():
                 break
             
             # Log user input
+            # codeql[py/log-injection]
             logger.info(f"User input: {sanitize_log_input(user_input)}")
             
             result = run_agent(user_input)
             
             # Log agent response
+            # codeql[py/log-injection]
             logger.info(f"Agent response: {sanitize_log_input(json.dumps(result, default=str))}")
             
             print(f"\nAgent: {json.dumps(result, indent=2, default=str)}\n")
@@ -967,6 +987,7 @@ def main():
             print(f"\nGoodbye! Log saved to: {LOG_FILENAME}")
             break
         except Exception as e:
+            # codeql[py/log-injection]
             logger.error(f"Error in main loop: {sanitize_log_input(str(e))}")
             print(f"\nError: {e}\n")
 
