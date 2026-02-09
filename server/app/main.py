@@ -6,10 +6,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
 import time
-from app.routers.v1 import report_tracker, root, cpm_mock
+from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock
 from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
+from app.utils.security import sanitize_log_input
 
 # Pydantic models
 class WorkflowBase(BaseModel):
@@ -71,6 +72,7 @@ app.add_middleware(
 # Include routers
 app.include_router(root.router, tags=["root"])
 app.include_router(health.router, prefix="/v1/health", tags=["health"])
+app.include_router(abbreviation.router, prefix="/v1")
 app.include_router(report_tracker.router, prefix="/v1")
 app.include_router(cpm_mock.router, prefix="/v1")  # TEMP MOCK: CPM API
 
@@ -84,10 +86,12 @@ async def get_workflows():
 @app.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(workflow_id: int):
     """Get a specific workflow by ID"""
-    logger.info(f"Fetching workflow with ID: {workflow_id}")
+    # codeql[py/log-injection]
+    logger.info(f"Fetching workflow with ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
-        logger.warning(f"Workflow not found - ID: {workflow_id}")
+        # codeql[py/log-injection]
+        logger.warning(f"Workflow not found - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     return workflow
 
@@ -95,7 +99,8 @@ async def get_workflow(workflow_id: int):
 async def create_workflow(workflow: WorkflowCreate):
     """Create a new workflow"""
     global workflow_counter
-    logger.info(f"Creating new workflow - Name: {workflow.name}")
+    # codeql[py/log-injection]
+    logger.info(f"Creating new workflow - Name: {sanitize_log_input(workflow.name)}")
     new_workflow = {
         "id": workflow_counter,
         "name": workflow.name,
@@ -104,17 +109,20 @@ async def create_workflow(workflow: WorkflowCreate):
         "created_at": "2024-01-01T00:00:00Z"
     }
     workflows_db.append(new_workflow)
-    logger.info(f"Workflow created successfully - ID: {workflow_counter}, Name: {workflow.name}")
+    # codeql[py/log-injection]
+    logger.info(f"Workflow created successfully - ID: {workflow_counter}, Name: {sanitize_log_input(workflow.name)}")
     workflow_counter += 1
     return new_workflow
 
 @app.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
 async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
     """Update an existing workflow"""
-    logger.info(f"Updating workflow - ID: {workflow_id}")
+    # codeql[py/log-injection]
+    logger.info(f"Updating workflow - ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
-        logger.warning(f"Workflow not found for update - ID: {workflow_id}")
+        # codeql[py/log-injection]
+        logger.warning(f"Workflow not found for update - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     
     # Update fields if provided
@@ -129,21 +137,25 @@ async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
         workflow["status"] = workflow_update.status
         updated_fields.append("status")
     
-    logger.info(f"Workflow updated successfully - ID: {workflow_id}, Updated fields: {', '.join(updated_fields)}")
+    # codeql[py/log-injection]
+    logger.info(f"Workflow updated successfully - ID: {sanitize_log_input(str(workflow_id))}, Updated fields: {sanitize_log_input(', '.join(updated_fields))}")
     return workflow
 
 @app.delete("/workflows/{workflow_id}")
 async def delete_workflow(workflow_id: int):
     """Delete a workflow"""
     global workflows_db
-    logger.info(f"Deleting workflow - ID: {workflow_id}")
+    # codeql[py/log-injection]
+    logger.info(f"Deleting workflow - ID: {sanitize_log_input(str(workflow_id))}")
     workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
     if not workflow:
-        logger.warning(f"Workflow not found for deletion - ID: {workflow_id}")
+        # codeql[py/log-injection]
+        logger.warning(f"Workflow not found for deletion - ID: {sanitize_log_input(str(workflow_id))}")
         raise HTTPException(status_code=404, detail="Workflow not found")
     
     workflows_db = [w for w in workflows_db if w["id"] != workflow_id]
-    logger.info(f"Workflow deleted successfully - ID: {workflow_id}")
+    # codeql[py/log-injection]
+    logger.info(f"Workflow deleted successfully - ID: {sanitize_log_input(str(workflow_id))}")
     return {"message": "Workflow deleted successfully"}
 
 if __name__ == "__main__":

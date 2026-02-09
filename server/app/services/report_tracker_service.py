@@ -12,6 +12,7 @@ from app.models.report_tracker import ReportTracker
 from app.models.content_product import ContentProduct
 from app.schemas.report_tracker import ReportTrackerCreateRequest
 from app.constants import WorkflowActionType
+from app.utils.security import sanitize_log_input
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class ReportTrackerService:
         
         Args:
             db: Async database session
-            create_data: Request data containing report_id and content_product_name
+            create_data: Request data with transaction_id, pr_id, content_type, document_type
             
         Returns:
             Newly created ReportTracker instance with initialized workflow
@@ -44,40 +45,58 @@ class ReportTrackerService:
             ValueError: If content product is not found or has no workflow
         """
         from app.exceptions import UnprocessableEntityException
+        from sqlalchemy import text
+        
+        try:
+            report_id = await ReportTrackerService._generate_unique_report_id(db, create_data.document_type)
+            s_doc_type = sanitize_log_input(create_data.document_type)
+            # codeql[py/log-injection]
+            logger.info(f"Generated report_id '{sanitize_log_input(report_id)}' for document_type '{s_doc_type}'")
+        except Exception as e:
+            s_doc_type = sanitize_log_input(create_data.document_type)
+            # codeql[py/log-injection]
+            logger.error(f"Failed to generate report_id from document_type '{s_doc_type}': {sanitize_log_input(str(e))}")
+            raise ValueError(f"Failed to generate report_id: {e}")
+
+
         
         # Check if a report tracker with the same report_id already exists
-        existing_tracker = await ReportTrackerService.get_by_report_id(db, create_data.report_id)
+        existing_tracker = await ReportTrackerService.get_by_report_id(db, report_id)
         if existing_tracker:
             raise UnprocessableEntityException(
-                detail=f"Report tracker with report_id '{create_data.report_id}' already exists"
+                detail=f"Report tracker with report_id '{report_id}' already exists"
             )
         
-        # Get CPM record from mock or real API
+        # Get CPM record from mock or real API using content_type as cp_name
         from app.services.cpm_client_service import CPMClientService
         
-        logger.debug(
-            "Fetching CPM record for lob=%s, sub_lob=%s, cp_name=%s",
-            create_data.lob, create_data.sub_lob, create_data.content_product_name,
-        )
+        s_lob = sanitize_log_input(create_data.lob)
+        s_sub_lob = sanitize_log_input(create_data.sub_lob)
+        s_content_type = sanitize_log_input(create_data.content_type)
+        logger.debug(f"Fetching CPM record for lob={s_lob}, sub_lob={s_sub_lob}, content_type={s_content_type}")
         cpm_record = await CPMClientService.get_cpm_by_filters(
             lob=create_data.lob,
             sub_lob=create_data.sub_lob,
-            cp_name=create_data.content_product_name
+            cp_name=create_data.content_type
         )
         
-        # Extract workflow_id (UUID string) from CPM record
+        # Extract workflow_id and cpm_id from CPM record
         workflow_id = cpm_record.get("workflow_id")
+        cpm_id = cpm_record.get("id") or cpm_record.get("cpm_id")  # Try both keys
+        
         if not workflow_id:
-            logger.error("No workflow_id in CPM record")
-            raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, cp_name={create_data.content_product_name}")
+            logger.error(f"No workflow_id in CPM record")
+            raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService
-        logger.debug("Getting workflow JSON for workflow_id: %s", workflow_id)
+        # codeql[py/log-injection]
+        logger.debug(f"Getting workflow JSON for workflow_id: {sanitize_log_input(str(workflow_id))}")
         workflow_json = await WorkflowService.get_workflow_json_from_workflow(db, workflow_id)
         
         if not workflow_json:
-            logger.error("Workflow not found for workflow_id: %s", workflow_id)
+            # codeql[py/log-injection]
+            logger.error(f"Workflow not found for workflow_id: {sanitize_log_input(str(workflow_id))}")
             raise ValueError(f"Workflow not found for workflow_id '{workflow_id}'")
         
         # Ensure workflow_json is a dictionary
@@ -85,12 +104,17 @@ class ReportTrackerService:
             try:
                 workflow_json = json.loads(workflow_json)
             except json.JSONDecodeError:
-                logger.error("Invalid workflow JSON format: %s", workflow_json)
+                # codeql[py/log-injection]
+                logger.error(f"Invalid workflow JSON format: {sanitize_log_input(str(workflow_json))}")
                 workflow_json = {}
         
-        # Create the tracker with default empty workflow_steps_json
+        # Create the tracker with all new fields
         tracker = ReportTracker(
-            report_id=create_data.report_id,
+            report_id=report_id,
+            transaction_id=create_data.transaction_id,
+            pr_id=create_data.pr_id,
+            cpm_id=cpm_id,
+            action_code=create_data.action_code,
             workflow_json=workflow_json if isinstance(workflow_json, dict) else {},
             workflow_steps_json=create_data.create_workflow_steps_json(workflow_json)
         )
@@ -100,6 +124,35 @@ class ReportTrackerService:
         await db.refresh(tracker)
         
         return tracker
+
+
+
+    @staticmethod
+    async def _generate_unique_report_id(db: AsyncSession, document_type: str) -> str:
+        """
+        Generate a unique report ID using the abbreviation module and database sequence.
+        
+        Args:
+            db: Database session
+            document_type: Document type name
+            
+        Returns:
+            Formatted report ID strings (e.g. 'CO-100001')
+        """
+        from app.services.abbreviation_service import AbbreviationService
+        from sqlalchemy import text
+        
+        abbreviation_service = AbbreviationService()
+        abbreviation = await abbreviation_service.get_abbreviation(db, document_type)
+        
+        # Get next sequence value from PostgreSQL
+        # Note: This specific SQL is Postgres-only. 
+        # For testing with SQLite, this method should be mocked.
+        result = await db.execute(text("SELECT nextval('report_id_seq')"))
+        sequence_value = result.scalar()
+        
+        # Format: {ABBREVIATION}-{SEQUENCE}
+        return f"{abbreviation}-{sequence_value}"
 
     @staticmethod
     async def get_by_report_id(db: AsyncSession, report_id: str) -> Optional[ReportTracker]:
@@ -971,7 +1024,8 @@ class ReportTrackerService:
 
             # Handle special actions (no-op for now)
             if WorkflowActionType.is_special_action(action):
-                logger.info(f"Special action '{action}' executed (no-op) for step '{target_step_id}'")
+                # codeql[py/log-injection]
+                logger.info(f"Special action '{sanitize_log_input(action)}' executed (no-op) for step '{sanitize_log_input(target_step_id)}'")
             elif WorkflowActionType.is_forward_action(action):
                 ReportTrackerService._accept(
                     tracker, steps, target_step, target_step_json, workflow_json, transition_path

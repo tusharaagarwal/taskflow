@@ -40,6 +40,10 @@ async def create_report_tracker(
         return ReportTrackerResponse(
             id=tracker.id,
             report_id=tracker.report_id,
+            transaction_id=tracker.transaction_id,
+            pr_id=tracker.pr_id,
+            cpm_id=tracker.cpm_id,
+            action_code=tracker.action_code,
             workflow_json=tracker.workflow_json,
             workflow_steps_json=tracker.workflow_steps_json,
             created_at=tracker.created_at,
@@ -47,7 +51,7 @@ async def create_report_tracker(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except ValueError as e:
@@ -58,6 +62,7 @@ async def create_report_tracker(
     except HTTPException as e:
         raise e
     except Exception as e:
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
@@ -117,6 +122,10 @@ async def update_report_tracker(
         return ReportTrackerResponse(
             id=tracker.id,
             report_id=tracker.report_id,
+            transaction_id=tracker.transaction_id,
+            pr_id=tracker.pr_id,
+            cpm_id=tracker.cpm_id,
+            action_code=tracker.action_code,
             workflow_json=tracker.workflow_json,
             workflow_steps_json=tracker.workflow_steps_json,
             created_at=tracker.created_at,
@@ -124,7 +133,7 @@ async def update_report_tracker(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except ValueError as e:
@@ -213,6 +222,10 @@ async def get_report_tracker(
     return ReportTrackerResponse(
         id=tracker.id,
         report_id=tracker.report_id,
+        transaction_id=tracker.transaction_id,
+        pr_id=tracker.pr_id,
+        cpm_id=tracker.cpm_id,
+        action_code=tracker.action_code,
         workflow_json=tracker.workflow_json,
         workflow_steps_json=tracker.workflow_steps_json,
         created_at=tracker.created_at,
@@ -257,6 +270,10 @@ async def assign_user_to_step(
         return ReportTrackerResponse(
             id=tracker.id,
             report_id=tracker.report_id,
+            transaction_id=tracker.transaction_id,
+            pr_id=tracker.pr_id,
+            cpm_id=tracker.cpm_id,
+            action_code=tracker.action_code,
             workflow_json=tracker.workflow_json,
             workflow_steps_json=tracker.workflow_steps_json,
             created_at=tracker.created_at,
@@ -264,7 +281,7 @@ async def assign_user_to_step(
         )
     except UnprocessableEntityException as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e.detail)
         )
     except HTTPException as e:

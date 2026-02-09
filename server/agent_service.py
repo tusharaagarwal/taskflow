@@ -31,6 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from dotenv import load_dotenv
 
+from app.utils.security import sanitize_log_input
+
 # ============================================================
 # Configuration
 # ============================================================
@@ -107,8 +109,8 @@ class WorkflowAgentService:
         self._import_sqs_consumer()
         
         logger.info(f"✅ {SERVICE_NAME} initialized")
-        logger.info(f"   Mode: {mode}")
-        logger.info(f"   Log file: {LOG_FILENAME}")
+        logger.info(f"   Mode: {sanitize_log_input(mode)}")
+        logger.info(f"   Log file: {sanitize_log_input(str(LOG_FILENAME))}")
     
     def _import_agent(self):
         """Import the API agent module"""
@@ -120,11 +122,11 @@ class WorkflowAgentService:
         except ImportError as e:
             # Handle specific LangChain dependency issues gracefully
             if "langchain" in str(e):
-                logger.error(f"❌ Failed to import API Agent: {e}")
+                logger.error(f"❌ Failed to import API Agent: {sanitize_log_input(str(e))}")
                 logger.warning("   Please ensure langchain packages are installed:")
                 logger.warning("   poetry add langchain-anthropic langchain-openai langchain-core")
             else:
-                logger.error(f"❌ Failed to import API Agent: {e}")
+                logger.error(f"❌ Failed to import API Agent: {sanitize_log_input(str(e))}")
             self.run_agent = None
             self.run_agent_rule_based = None
     
@@ -149,11 +151,11 @@ class WorkflowAgentService:
         except ImportError as e:
             # Handle boto3 dependency issues gracefully
             if "boto3" in str(e):
-                logger.error(f"❌ Failed to import SQS Consumer: {e}")
+                logger.error(f"❌ Failed to import SQS Consumer: {sanitize_log_input(str(e))}")
                 logger.warning("   Please ensure boto3 is installed:")
                 logger.warning("   poetry add boto3")
             else:
-                logger.error(f"❌ Failed to import SQS Consumer: {e}")
+                logger.error(f"❌ Failed to import SQS Consumer: {sanitize_log_input(str(e))}")
             self.SQSMessageConsumer = None
     
     def _handle_sqs_message(self, message_content: str) -> dict:
@@ -167,7 +169,7 @@ class WorkflowAgentService:
             Agent response
         """
         if self.run_agent:
-            logger.info(f"🤖 Processing through agent: {message_content[:100]}...")
+            logger.info(f"🤖 Processing through agent: {sanitize_log_input(message_content)[:100]}...")
             return self.run_agent(message_content)
         else:
             logger.warning("⚠️ Agent not available, using rule-based fallback")
@@ -190,7 +192,7 @@ class WorkflowAgentService:
                 logger.error("❌ Failed to create SQS consumer from config")
                 return
             
-            logger.info(f"📡 Starting SQS consumer for queue: {self.queue_name}")
+            logger.info(f"📡 Starting SQS consumer for queue: {sanitize_log_input(self.queue_name)}")
             
             while self.running:
                 try:
@@ -202,7 +204,7 @@ class WorkflowAgentService:
                     )
                 except Exception as e:
                     if self.running:
-                        logger.error(f"❌ SQS consumer error: {e}")
+                        logger.error(f"❌ SQS consumer error: {sanitize_log_input(str(e))}")
                         time.sleep(5)  # Wait before retry
                     else:
                         break
@@ -210,7 +212,7 @@ class WorkflowAgentService:
             consumer.print_stats()
             
         except Exception as e:
-            logger.error(f"❌ Fatal SQS consumer error: {e}")
+            logger.error(f"❌ Fatal SQS consumer error: {sanitize_log_input(str(e))}")
     
     def _run_cli(self):
         """Run the interactive CLI in a thread"""
@@ -242,9 +244,9 @@ class WorkflowAgentService:
                     self.stop()
                     break
                 
-                logger.info(f"[CLI] User input: {user_input}")
+                logger.info(f"[CLI] User input: {sanitize_log_input(user_input)}")
                 result = self.run_agent(user_input)
-                logger.info(f"[CLI] Agent response: {json.dumps(result, default=str)}")
+                logger.info(f"[CLI] Agent response: {sanitize_log_input(json.dumps(result, default=str))}")
                 
                 print(f"\nAgent: {json.dumps(result, indent=2, default=str)}\n")
                 
@@ -257,7 +259,7 @@ class WorkflowAgentService:
                 self.stop()
                 break
             except Exception as e:
-                logger.error(f"CLI error: {e}")
+                logger.error(f"CLI error: {sanitize_log_input(str(e))}")
     
     def start(self):
         """Start the service"""
@@ -304,7 +306,7 @@ class WorkflowAgentService:
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
-        logger.info(f"Received signal {signum}")
+        logger.info(f"Received signal {sanitize_log_input(str(signum))}")
         self.stop()
         sys.exit(0)
 
@@ -328,7 +330,7 @@ def daemonize():
         if pid > 0:
             sys.exit(0)
     except OSError as e:
-        logger.error(f"Fork #1 failed: {e}")
+        logger.error(f"Fork #1 failed: {sanitize_log_input(str(e))}")
         sys.exit(1)
     
     # Decouple from parent environment
@@ -342,7 +344,7 @@ def daemonize():
         if pid > 0:
             sys.exit(0)
     except OSError as e:
-        logger.error(f"Fork #2 failed: {e}")
+        logger.error(f"Fork #2 failed: {sanitize_log_input(str(e))}")
         sys.exit(1)
     
     # Redirect standard file descriptors
@@ -410,7 +412,7 @@ def stop_service():
                 os.kill(pid, signal.SIGKILL)
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to stop service: {e}")
+            logger.error(f"❌ Failed to stop service: {sanitize_log_input(str(e))}")
             return False
     else:
         logger.info("Service is not running")
@@ -518,7 +520,7 @@ Examples:
     try:
         service.start()
     except Exception as e:
-        logger.error(f"❌ Service error: {e}")
+        logger.error(f"❌ Service error: {sanitize_log_input(str(e))}")
         service.stop()
         sys.exit(1)
 
