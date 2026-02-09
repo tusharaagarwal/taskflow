@@ -50,7 +50,7 @@ jobs:
   backend-gates:
     name: Backend CI Gates
     needs: detect-changes
-    if: needs.detect-changes.outputs.backend == 'true' or needs.detect-changes.outputs.cicd == 'true'
+    if: needs.detect-changes.outputs.backend == 'true' || needs.detect-changes.outputs.cicd == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

@@ -6,6 +6,8 @@ This file will be modified when switching to the real CPM API.
 import logging
 from typing import Dict, Any
 
+from app.utils.security import sanitize_log_input
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,19 +33,19 @@ class CPMClientService:
             ValueError: If CPM record not found
             NotImplementedError: If real API is requested but not yet implemented
         """
-        from app.config.feature_flags import MOCK_CPM_API_USED
+        from app.config_settings.feature_flags import MOCK_CPM_API_USED
         
         if MOCK_CPM_API_USED:
             # Use mock API - direct function call (faster than HTTP)
-            logger.info(f"[MOCK] Fetching CPM data for lob={lob}, sub_lob={sub_lob}, cp_name={cp_name}")
+            logger.info(f"[MOCK] Fetching CPM data for lob={sanitize_log_input(lob)}, sub_lob={sanitize_log_input(sub_lob)}, cp_name={sanitize_log_input(cp_name)}")
             from app.routers.v1.cpm_mock import get_cpm_mock_data
             
             try:
                 cpm_record = get_cpm_mock_data(lob, sub_lob, cp_name)
-                logger.info(f"[MOCK] CPM record retrieved with workflow_id: {cpm_record.get('workflow_id')}")
+                logger.info(f"[MOCK] CPM record retrieved with workflow_id: {sanitize_log_input(str(cpm_record.get('workflow_id', '')))}")
                 return cpm_record
             except Exception as e:
-                logger.error(f"[MOCK] Error retrieving CPM record: {e}")
+                logger.error(f"[MOCK] Error retrieving CPM record: {sanitize_log_input(str(e))}")
                 raise ValueError(f"Mock CPM record not found for lob={lob}, sub_lob={sub_lob}, cp_name={cp_name}")
         else:
             # TODO: Call real external CPM API

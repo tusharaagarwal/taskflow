@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.logger import logger
+from app.utils.security import sanitize_log_input
 import traceback
 import sys
 
@@ -28,12 +29,12 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         logger.info(
             f"Request started - "
-            f"ID: {request_id}, "
-            f"Correlation-ID: {correlation_id}, "
-            f"Method: {request.method}, "
-            f"URL: {request.url}, "
-            f"Client: {request.client.host if request.client else 'unknown'}, "
-            f"User-Agent: {request.headers.get('user-agent', 'unknown')}"
+            f"ID: {sanitize_log_input(request_id)}, "
+            f"Correlation-ID: {sanitize_log_input(correlation_id)}, "
+            f"Method: {sanitize_log_input(request.method)}, "
+            f"URL: {sanitize_log_input(str(request.url))}, "
+            f"Client: {sanitize_log_input(request.client.host) if request.client else 'unknown'}, "
+            f"User-Agent: {sanitize_log_input(request.headers.get('user-agent', 'unknown'))}"
         )
         
         # Process request
@@ -61,8 +62,8 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
             # Log successful response
             logger.info(
                 f"Request completed - "
-                f"ID: {request_id}, "
-                f"Correlation-ID: {correlation_id}, "
+                f"ID: {sanitize_log_input(request_id)}, "
+                f"Correlation-ID: {sanitize_log_input(correlation_id)}, "
                 f"Status: {response.status_code}, "
                 f"Process-Time: {process_time:.4f}s"
             )
@@ -77,10 +78,10 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
             log_level = logger.error if e.status_code >= 500 else logger.warning
             log_level(
                 f"HTTP Exception - "
-                f"ID: {request_id}, "
-                f"Correlation-ID: {correlation_id}, "
+                f"ID: {sanitize_log_input(request_id)}, "
+                f"Correlation-ID: {sanitize_log_input(correlation_id)}, "
                 f"Status: {e.status_code}, "
-                f"Detail: {e.detail}, "
+                f"Detail: {sanitize_log_input(str(e.detail))}, "
                 f"Process-Time: {process_time:.4f}s"
             )
             
@@ -115,12 +116,12 @@ class RequestResponseMiddleware(BaseHTTPMiddleware):
             # Log unexpected error with full stack trace
             logger.error(
                 f"Unexpected error - "
-                f"ID: {request_id}, "
-                f"Correlation-ID: {correlation_id}, "
-                f"Error: {str(e)}, "
-                f"Type: {type(e).__name__}, "
+                f"ID: {sanitize_log_input(request_id)}, "
+                f"Correlation-ID: {sanitize_log_input(correlation_id)}, "
+                f"Error: {sanitize_log_input(str(e))}, "
+                f"Type: {sanitize_log_input(type(e).__name__)}, "
                 f"Process-Time: {process_time:.4f}s, "
-                f"Stack-Trace: {stack_trace_str}"
+                f"Stack-Trace: {sanitize_log_input(stack_trace_str)}"
             )
             
             # Create error response for unexpected errors
