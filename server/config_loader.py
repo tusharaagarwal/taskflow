@@ -184,7 +184,41 @@ class ConfigManager:
             raise RuntimeError("Configuration not loaded")
         return self._config.get("cors_origins", ["*"])
 
-    
+    def get_aws_messaging_config(self) -> Dict[str, Any]:
+        """Get AWS messaging configuration for the current environment."""
+        return {
+            "region": self._get_config_value("AWS_REGION", "ap-south-2"),
+            "access_key_id": self._get_config_value("AWS_ACCESS_KEY_ID", ""),
+            "secret_access_key": self._get_config_value("AWS_SECRET_ACCESS_KEY", ""),
+            "session_token": self._get_config_value("AWS_SESSION_TOKEN", ""),
+            "messaging_enabled": self._parse_bool(self._get_config_value("MESSAGING_ENABLED", False)),
+            "assembler_task_queue_name": self._get_config_value("ASSEMBLER_TASK_QUEUE_NAME", "CreditOpinionAssembler"),
+            "assembler_task_topic_name": self._get_config_value("ASSEMBLER_TASK_TOPIC_NAME", "workflow_orchestrator_topic.fifo"),
+            "assembler_message_group_id": self._get_config_value("ASSEMBLER_MESSAGE_GROUP_ID", "CreditOpinionAssembler-group-1"),
+            "assembler_completion_queue_name": self._get_config_value("ASSEMBLER_COMPLETION_QUEUE_NAME", "WorkflowOrchestratorAssemblerCompletion"),
+            "consumer_notification_topic_name": self._get_config_value("CONSUMER_NOTIFICATION_TOPIC_NAME", "workflow_orchestrator_consumer_notifications.fifo"),
+            "consumer_notification_queue_name": self._get_config_value("CONSUMER_NOTIFICATION_QUEUE_NAME", "WorkflowOrchestratorConsumerNotifications"),
+            "consumer_notification_message_group_id": self._get_config_value("CONSUMER_NOTIFICATION_MESSAGE_GROUP_ID", "consumer-notification-group-1"),
+            "sqs_max_messages": int(self._get_config_value("SQS_MAX_MESSAGES", 10)),
+            "sqs_wait_time_seconds": int(self._get_config_value("SQS_WAIT_TIME_SECONDS", 20)),
+            "sqs_visibility_timeout": int(self._get_config_value("SQS_VISIBILITY_TIMEOUT", 30)),
+            "sqs_poll_interval": int(self._get_config_value("SQS_POLL_INTERVAL", 1)),
+            "sqs_auto_delete_messages": self._parse_bool(self._get_config_value("SQS_AUTO_DELETE_MESSAGES", True)),
+            "sns_default_message_group_id": self._get_config_value("SNS_DEFAULT_MESSAGE_GROUP_ID", "workflow-group-1")
+        }
+
+    def _parse_bool(self, value: Any) -> bool:
+        """Parse a value as boolean."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes", "on")
+        return bool(value)
+
+    def is_messaging_enabled(self) -> bool:
+        """Check if messaging is enabled for the current environment."""
+        return self._parse_bool(self._get_config_value("MESSAGING_ENABLED", False))
+
     def reload_config(self) -> None:
         """Reload configuration from file."""
         self._load_config()
