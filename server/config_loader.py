@@ -187,7 +187,7 @@ class ConfigManager:
     def get_aws_messaging_config(self) -> Dict[str, Any]:
         """Get AWS messaging configuration for the current environment."""
         return {
-            "region": self._get_config_value("AWS_REGION", "ap-south-2"),
+            "region": self._get_config_value("AWS_REGION", "ap-south-1"),
             "access_key_id": self._get_config_value("AWS_ACCESS_KEY_ID", ""),
             "secret_access_key": self._get_config_value("AWS_SECRET_ACCESS_KEY", ""),
             "session_token": self._get_config_value("AWS_SESSION_TOKEN", ""),
