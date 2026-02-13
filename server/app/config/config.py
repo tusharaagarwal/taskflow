@@ -1,5 +1,6 @@
 # Configuration settings for the FastAPI application (no pydantic-settings)
 import os
+from pathlib import Path
 from typing import List, Optional
 
 # Load .env if present (python-dotenv)
@@ -149,21 +150,55 @@ class Settings:
         self.retry_attempts: int = _env_int("RETRY_ATTEMPTS", 3)
         self.retry_delay: int = _env_int("RETRY_DELAY", 5)
 
-        # Messaging (used by messaging router and AWS service)
-        self.messaging_enabled: bool = _env_bool("MESSAGING_ENABLED", False)
-        self.aws_region: str = _env("AWS_REGION", "ap-south-2")
-        self.aws_access_key_id: Optional[str] = _env("AWS_ACCESS_KEY_ID") or None
-        self.aws_secret_access_key: Optional[str] = _env("AWS_SECRET_ACCESS_KEY") or None
-        self.aws_session_token: Optional[str] = _env("AWS_SESSION_TOKEN") or None
-        self.assembler_queue_name: str = _env(
-            "ASSEMBLER_QUEUE_NAME", "CreditOpinionAssembler"
-        )
-        self.endpoint_queue_name: str = _env(
-            "ENDPOINT_QUEUE_NAME", "WorkflowOrchestratorEndpoint"
-        )
-        self.report_update_topic_name: str = _env(
-            "REPORT_UPDATE_TOPIC_NAME", "workflow_orchestrator_updates"
-        )
+        # AWS Messaging Configuration (loaded via ConfigManager)
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+            from config_loader import config as config_manager
+            aws_config = config_manager.get_aws_messaging_config()
+
+            self.messaging_enabled: bool = aws_config["messaging_enabled"]
+            self.aws_region: str = aws_config["region"]
+            self.aws_access_key_id: Optional[str] = aws_config["access_key_id"] or None
+            self.aws_secret_access_key: Optional[str] = aws_config["secret_access_key"] or None
+            self.aws_session_token: Optional[str] = aws_config["session_token"] or None
+            self.assembler_task_queue_name: str = aws_config["assembler_task_queue_name"]
+            self.assembler_task_topic_name: str = aws_config["assembler_task_topic_name"]
+            self.assembler_message_group_id: str = aws_config["assembler_message_group_id"]
+            self.assembler_completion_queue_name: str = aws_config["assembler_completion_queue_name"]
+            self.consumer_notification_topic_name: str = aws_config["consumer_notification_topic_name"]
+            self.consumer_notification_queue_name: str = aws_config["consumer_notification_queue_name"]
+            self.consumer_notification_message_group_id: str = aws_config["consumer_notification_message_group_id"]
+            self.sqs_max_messages: int = aws_config["sqs_max_messages"]
+            self.sqs_wait_time_seconds: int = aws_config["sqs_wait_time_seconds"]
+            self.sqs_visibility_timeout: int = aws_config["sqs_visibility_timeout"]
+            self.sqs_poll_interval: int = aws_config["sqs_poll_interval"]
+            self.sqs_auto_delete_messages: bool = aws_config["sqs_auto_delete_messages"]
+            self.sns_default_message_group_id: str = aws_config["sns_default_message_group_id"]
+            # Legacy names for backward compatibility where still referenced
+            self.assembler_queue_name: str = aws_config["assembler_task_queue_name"]
+            self.report_update_topic_name: str = aws_config["consumer_notification_topic_name"]
+        except Exception:
+            self.messaging_enabled: bool = False
+            self.aws_region: str = "ap-south-1"
+            self.aws_access_key_id: Optional[str] = None
+            self.aws_secret_access_key: Optional[str] = None
+            self.aws_session_token: Optional[str] = None
+            self.assembler_task_queue_name: str = "orchestrator-to-assembler"
+            self.assembler_task_topic_name: str = "workflow_orchestrator_topic.fifo"
+            self.assembler_message_group_id: str = "orchestrator-to-assembler-group-1"
+            self.assembler_completion_queue_name: str = "WorkflowOrchestratorAssemblerCompletion"
+            self.consumer_notification_topic_name: str = "workflow_orchestrator_consumer_notifications.fifo"
+            self.consumer_notification_queue_name: str = "WorkflowOrchestratorConsumerNotifications"
+            self.consumer_notification_message_group_id: str = "consumer-notification-group-1"
+            self.sqs_max_messages: int = 10
+            self.sqs_wait_time_seconds: int = 20
+            self.sqs_visibility_timeout: int = 30
+            self.sqs_poll_interval: int = 1
+            self.sqs_auto_delete_messages: bool = True
+            self.sns_default_message_group_id: str = "workflow-group-1"
+            self.assembler_queue_name: str = "orchestrator-to-assembler"
+            self.report_update_topic_name: str = "workflow_orchestrator_consumer_notifications.fifo"
 
 
 # Single instance

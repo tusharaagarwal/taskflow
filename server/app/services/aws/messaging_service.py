@@ -83,18 +83,14 @@ class MessagingService:
         - SNS Topic: For broadcasting (if publish_to_sns=True)
         - SQS Queue: For direct consumption by assembler (if send_to_sqs=True)
 
-        Message Format (matches consumer's _extract_job_fields expectation):
+        Message Format (flat structure):
         {
             "message_id": "msg_<timestamp>",
             "timestamp": "<ISO8601>",
             "type": "assembler_task",
-            "tracker": {
-                "report_id": "<report_id>",
-                "workflow_id": "<workflow_id>"
-            },
-            "create_data": {
-                "content_product_name": "<cpm_id>"
-            },
+            "report_id": "<report_id>",
+            "workflow_id": "<workflow_id>",
+            "content_product_name": "<cpm_id>",
             "payload_id": "<workflow_id>",
             "pr_id": "<pr_id>",
             "transaction_id": "<transaction_id>",
@@ -129,18 +125,14 @@ class MessagingService:
 
         timestamp = datetime.now(timezone.utc).isoformat()
 
-        # Construct message in the format expected by consumer's _extract_job_fields
+        # Construct message (flat structure)
         message: Dict[str, Any] = {
             "message_id": f"msg_{timestamp}",
             "timestamp": timestamp,
             "type": "assembler_task",
-            "tracker": {
-                "report_id": report_id,
-                "workflow_id": workflow_id
-            },
-            "create_data": {
-                "content_product_name": cpm_id or ""
-            },
+            "report_id": report_id,
+            "workflow_id": workflow_id,
+            "content_product_name": cpm_id or "",
             "payload_id": workflow_id
         }
 

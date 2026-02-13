@@ -32,11 +32,48 @@ async def create_report_tracker(
     create_data: ReportTrackerCreateRequest,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new report tracker record."""
+    """
+    Create a new report tracker record.
+
+    After creating the tracker, notifies the Content Assembler to start
+    creating the first draft of the report.
+    """
     try:
+        # Step 1: Create the report tracker in database
         tracker = await ReportTrackerService.create(db, create_data)
-        
-        # Manually construct response to debug validation error
+
+        # Step 2: Notify Content Assembler to start drafting
+        import logging
+        from app.services.aws.messaging_service import get_messaging_service
+        from app.config.config import settings
+
+        logger = logging.getLogger(__name__)
+        if settings.messaging_enabled:
+            try:
+                messaging_service = get_messaging_service()
+                messaging_result = messaging_service.notify_assembler_to_start(
+                    report_id=tracker.report_id,
+                    workflow_id=str(tracker.id),
+                    cpm_id=tracker.cpm_id,
+                    pr_id=tracker.pr_id,
+                    transaction_id=tracker.transaction_id,
+                    action_code=tracker.action_code,
+                    publish_to_sns=True,
+                    send_to_sqs=True
+                )
+                logger.info(
+                    "Notified Content Assembler for report_id: %s - Result: %s",
+                    tracker.report_id,
+                    messaging_result
+                )
+            except Exception as messaging_error:
+                logger.error(
+                    "Failed to notify Content Assembler for report_id: %s - Error: %s",
+                    tracker.report_id,
+                    str(messaging_error)
+                )
+
+        # Step 3: Return the response
         return ReportTrackerResponse(
             id=tracker.id,
             report_id=tracker.report_id,
@@ -62,7 +99,6 @@ async def create_report_tracker(
     except HTTPException as e:
         raise e
     except Exception as e:
-
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
