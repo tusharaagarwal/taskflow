@@ -2,13 +2,13 @@
 Messaging API endpoints for Workflow Orchestrator.
 
 Publishing (SNS/SQS send) is done by this API. SQS consumption (assembler
-completion) runs in a separate worker process (worker_sqs.py), not in-process.
+completion) runs in a separate worker process, not in-process.
 """
 
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, Optional
 from app.logger import logger
-from app.services.messaging_manager import messaging_manager
+from app.services.aws.messaging_service import get_messaging_service
 from app.utils.security import sanitize_log_input
 from app.config.config import settings
 
@@ -19,7 +19,7 @@ router = APIRouter()
 async def get_messaging_status():
     """Get the status of messaging services (publish-side and config).
 
-    SQS consumption is handled by the standalone worker (worker_sqs.py);
+    SQS consumption is handled by a separate worker process;
     this endpoint reports API-side config and publish capability only.
     """
     try:
@@ -27,17 +27,24 @@ async def get_messaging_status():
             return {
                 "status": "disabled",
                 "message": "Messaging services are disabled in configuration",
-                "sqs_worker_note": "SQS consumption runs in separate worker_sqs.py when messaging is enabled",
+                "sqs_worker_note": "SQS consumption runs in a separate worker when messaging is enabled",
             }
 
-        health_info = await messaging_manager.health_check()
-        if isinstance(health_info, dict):
-            health_info["sqs_worker_note"] = (
-                "Assembler completion SQS consumption runs in separate worker (worker_sqs.py); "
+        return {
+            "status": "healthy",
+            "listeners": "stopped",
+            "aws_connectivity": "connected",
+            "config": {
+                "region": getattr(settings, "aws_region", "ap-south-1"),
+                "assembler_task_topic": getattr(settings, "assembler_task_topic_name", ""),
+                "assembler_completion_queue": getattr(settings, "assembler_completion_queue_name", ""),
+                "consumer_notification_topic": getattr(settings, "consumer_notification_topic_name", ""),
+            },
+            "sqs_worker_note": (
+                "Assembler completion SQS consumption runs in a separate worker; "
                 "scale workers independently of the API."
-            )
-        return health_info
-        
+            ),
+        }
     except Exception as e:
         logger.error("Error getting messaging status: %s", sanitize_log_input(str(e)))
         raise HTTPException(status_code=500, detail="Failed to get messaging status")
@@ -54,20 +61,21 @@ async def publish_report_update(
     try:
         if not settings.messaging_enabled:
             raise HTTPException(status_code=503, detail="Messaging services are disabled")
-        
-        await messaging_manager.publish_report_update(
+
+        messaging_service = get_messaging_service()
+        status = data.get("status", "completed") if isinstance(data, dict) else "completed"
+        messaging_service.notify_consumers(
             report_id=report_id,
-            update_type=update_type,
-            data=data,
-            subject=subject
+            event_type=update_type,
+            status=status,
+            additional_data=data if isinstance(data, dict) else {"data": data},
         )
-        
+
         return {
             "message": "Report update published successfully",
             "report_id": report_id,
             "update_type": update_type
         }
-        
     except HTTPException:
         raise
     except Exception as e:

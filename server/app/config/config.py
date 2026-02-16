@@ -36,6 +36,12 @@ def _env_list(key: str, default: Optional[List[str]] = None) -> List[str]:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
+def _orchestrator_base_url_from_server(host: str, port: int) -> str:
+    """Build orchestrator API base URL from server host/port. Use 127.0.0.1 when host is 0.0.0.0."""
+    base_host = "127.0.0.1" if (host == "0.0.0.0" or host == "::") else host
+    return f"http://{base_host}:{port}"
+
+
 class Settings:
     """Application settings loaded from environment variables (no pydantic-settings)."""
 
@@ -46,9 +52,9 @@ class Settings:
         self.debug: bool = _env_bool("DEBUG", True)
         self.environment: str = _env("ENVIRONMENT", "development")
 
-        # Server
+        # Server (workflow_orchestrator runs on 8003 by default)
         self.host: str = _env("HOST", "0.0.0.0")
-        self.port: int = _env_int("PORT", 8000)
+        self.port: int = _env_int("PORT", 8003)
         self.reload: bool = _env_bool("RELOAD", True)
 
         # Database
@@ -175,6 +181,10 @@ class Settings:
             self.sqs_poll_interval: int = aws_config["sqs_poll_interval"]
             self.sqs_auto_delete_messages: bool = aws_config["sqs_auto_delete_messages"]
             self.sns_default_message_group_id: str = aws_config["sns_default_message_group_id"]
+            _base = (aws_config.get("orchestrator_api_base_url") or "").strip()
+            if not _base or _base in ("http://localhost:8000", "http://localhost:8003"):
+                _base = _orchestrator_base_url_from_server(self.host, self.port)
+            self.orchestrator_api_base_url: str = _base
             # Legacy names for backward compatibility where still referenced
             self.assembler_queue_name: str = aws_config["assembler_task_queue_name"]
             self.report_update_topic_name: str = aws_config["consumer_notification_topic_name"]
@@ -185,11 +195,11 @@ class Settings:
             self.aws_secret_access_key: Optional[str] = None
             self.aws_session_token: Optional[str] = None
             self.assembler_task_queue_name: str = "orchestrator-to-assembler"
-            self.assembler_task_topic_name: str = "workflow_orchestrator_topic.fifo"
+            self.assembler_task_topic_name: str = "orchestrator-to-assembler"
             self.assembler_message_group_id: str = "orchestrator-to-assembler-group-1"
-            self.assembler_completion_queue_name: str = "WorkflowOrchestratorAssemblerCompletion"
-            self.consumer_notification_topic_name: str = "workflow_orchestrator_consumer_notifications.fifo"
-            self.consumer_notification_queue_name: str = "WorkflowOrchestratorConsumerNotifications"
+            self.assembler_completion_queue_name: str = "assembler-to-orchestrator"
+            self.consumer_notification_topic_name: str = "orchestrator-to-authoring"
+            self.consumer_notification_queue_name: str = "orchestrator-to-authoring"
             self.consumer_notification_message_group_id: str = "consumer-notification-group-1"
             self.sqs_max_messages: int = 10
             self.sqs_wait_time_seconds: int = 20
@@ -197,8 +207,11 @@ class Settings:
             self.sqs_poll_interval: int = 1
             self.sqs_auto_delete_messages: bool = True
             self.sns_default_message_group_id: str = "workflow-group-1"
+            self.orchestrator_api_base_url: str = _orchestrator_base_url_from_server(
+                self.host, self.port
+            )
             self.assembler_queue_name: str = "orchestrator-to-assembler"
-            self.report_update_topic_name: str = "workflow_orchestrator_consumer_notifications.fifo"
+            self.report_update_topic_name: str = "orchestrator-to-authoring"
 
 
 # Single instance
