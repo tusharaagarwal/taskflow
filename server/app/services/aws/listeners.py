@@ -4,7 +4,7 @@ This module provides background listeners for:
 - Content Assembler completion notifications
 """
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import httpx
 from app.config.config import settings
@@ -20,19 +20,18 @@ def handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> boo
     This function is called by the consumer when a message is received
     from the assembler completion queue. The consumer runs in a separate
     process; report tracker updates are performed via HTTP PUT to the
-    orchestrator API.
+    orchestrator API. workflow_id and draft_url are not forwarded to
+    consumer applications; only the new payload fields are used.
 
-    Expected payload format:
+    Expected payload format (assembler → orchestrator):
     {
-        "message_id": str (optional),
-        "timestamp": str (optional, ISO8601),
-        "type": "draft_completed" (optional),
         "report_id": str (required),
-        "workflow_id": str (optional),
+        "pr_id": str,
+        "transaction_id": str,
+        "content_type": str,
+        "step_name": str (e.g. "assembled_draft"),
         "status": "completed" | "failed" (required),
-        "draft_url": str (optional),
-        "error_message": str (optional, if status is "failed"),
-        "app_data": object (optional – metadata to store on current step before accept)
+        "completed_date": str (e.g. ISO8601)
     }
 
     Args:
@@ -44,17 +43,18 @@ def handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> boo
     """
     try:
         report_id = payload.get("report_id")
-        workflow_id = payload.get("workflow_id")
         status = payload.get("status", "unknown")
-        draft_url = payload.get("draft_url")
-        error_message = payload.get("error_message")
-        app_data: Optional[Dict[str, Any]] = payload.get("app_data")
+        step_name = payload.get("step_name")
+        pr_id = payload.get("pr_id")
+        transaction_id = payload.get("transaction_id")
 
         logger.info(
-            "Received assembler completion - report_id: %s, status: %s, message_id: %s",
+            "Received assembler completion - report_id: %s, status: %s, step_name: %s, pr_id: %s, message_id: %s",
             report_id,
             status,
-            message_id
+            step_name,
+            pr_id,
+            message_id,
         )
 
         if not report_id:
@@ -68,8 +68,6 @@ def handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> boo
                 return False
             url = f"{base_url}/v1/report-tracker/{report_id}"
             body: Dict[str, Any] = {"action": "accept"}
-            if app_data is not None:
-                body["app_data"] = app_data
             try:
                 with httpx.Client(timeout=30.0) as client:
                     response = client.put(url, json=body)
@@ -89,10 +87,12 @@ def handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> boo
                 )
                 return False
             messaging_service = get_messaging_service()
-            messaging_service.notify_draft_completed(
+            messaging_service.notify_consumers(
                 report_id=report_id,
-                workflow_id=workflow_id,
-                draft_url=draft_url
+                event_type="draft_completed",
+                pr_id=pr_id,
+                transaction_id=transaction_id,
+                status="completed",
             )
             logger.info(
                 "Draft completed notification sent to consumers - report_id: %s",
@@ -101,9 +101,8 @@ def handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> boo
 
         elif status == "failed":
             logger.error(
-                "Assembler reported failure for report_id: %s - Error: %s",
+                "Assembler reported failure for report_id: %s",
                 report_id,
-                error_message
             )
             # TODO: Implement error handling (retry, notify admin, etc.)
 
