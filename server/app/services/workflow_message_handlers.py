@@ -6,7 +6,7 @@ Handles business logic for processing SQS/SNS messages
 import logging
 from typing import Dict, Any
 from datetime import datetime, timezone
-from app.services.aws_messaging_service import MessageType, aws_messaging_service
+from app.services.aws.messaging_service import get_messaging_service
 from app.services.report_tracker_service import ReportTrackerService
 from app.utils.security import sanitize_log_input
 
@@ -47,10 +47,11 @@ class WorkflowMessageHandlers:
                 logger.info(f"Successfully processed Assembler completion for report {sanitize_log_input(str(report_id))}")
                 
                 # Publish update notification
-                await aws_messaging_service.publish_report_update(
+                get_messaging_service().notify_consumers(
                     report_id=report_id,
-                    update_type='assembler_completion',
-                    data={
+                    event_type='assembler_completion',
+                    status='completed',
+                    additional_data={
                         'status': 'first_draft_completed',
                         'next_step': 'second_step_processing'
                     }
@@ -107,10 +108,11 @@ class WorkflowMessageHandlers:
             await self.report_tracker_service.update_report(report_id, update_data)
             
             # Publish update
-            await aws_messaging_service.publish_report_update(
+            get_messaging_service().notify_consumers(
                 report_id=report_id,
-                update_type='second_step_started',
-                data={'status': 'second_step_in_progress'}
+                event_type='second_step_started',
+                status='completed',
+                additional_data={'status': 'second_step_in_progress'}
             )
             
             # Here you would integrate with your actual second step processing logic
@@ -142,10 +144,11 @@ class WorkflowMessageHandlers:
                 logger.info(f"Created report {sanitize_log_input(str(report_id))} for PR {sanitize_log_input(str(pr_id))}")
                 
                 # Publish update
-                await aws_messaging_service.publish_report_update(
-                    report_id=report_id,
-                    update_type='report_created',
-                    data={
+                get_messaging_service().notify_consumers(
+                    report_id=str(report_id),
+                    event_type='report_created',
+                    status='completed',
+                    additional_data={
                         'pr_id': pr_id,
                         'status': 'report_creation_started',
                         'workflow_step': 'first_draft'
@@ -177,10 +180,11 @@ class WorkflowMessageHandlers:
             await self.report_tracker_service.update_report(report_id, update_data)
             
             # Publish update
-            await aws_messaging_service.publish_report_update(
+            get_messaging_service().notify_consumers(
                 report_id=report_id,
-                update_type='first_draft_started',
-                data={
+                event_type='first_draft_started',
+                status='completed',
+                additional_data={
                     'pr_id': pr_id,
                     'status': 'first_draft_in_progress'
                 }
@@ -198,15 +202,7 @@ workflow_handlers = WorkflowMessageHandlers()
 
 
 def register_message_handlers():
-    """Register all message handlers with the AWS messaging service"""
-    aws_messaging_service.register_handler(
-        MessageType.ASSEMBLER_COMPLETION,
-        workflow_handlers.handle_assembler_completion
-    )
-    
-    aws_messaging_service.register_handler(
-        MessageType.ENDPOINT_PR_EVENT,
-        workflow_handlers.handle_endpoint_pr_event
-    )
-    
-    logger.info("All message handlers registered successfully")
+    """No-op: assembler completion is handled by app.services.aws.listeners;
+    endpoint PR events would be wired via a separate worker if needed.
+    """
+    logger.info("Message handler registration skipped (handlers run in aws.listeners / workers)")

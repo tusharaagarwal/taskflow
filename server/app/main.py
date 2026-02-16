@@ -11,6 +11,7 @@ from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
 from app.utils.security import sanitize_log_input
+from app.config.config import settings
 
 # Pydantic models
 class WorkflowBase(BaseModel):
@@ -165,4 +166,4 @@ async def delete_workflow(workflow_id: int):
     return {"message": "Workflow deleted successfully"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.host, port=settings.port)
