@@ -153,7 +153,40 @@ async def update_report_tracker(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Report tracker with report_id '{report_id}' not found"
             )
-        
+
+        # Notify consumer applications (orchestrator-to-authoring) on any workflow update
+        import logging
+        from app.services.aws.messaging_service import get_messaging_service
+        from app.config.config import settings
+
+        logger = logging.getLogger(__name__)
+        if settings.messaging_enabled:
+            try:
+                additional = {}
+                if update_data.action is not None:
+                    additional["action"] = update_data.action
+                get_messaging_service().notify_consumers(
+                    report_id=tracker.report_id,
+                    event_type="report_tracker_updated",
+                    pr_id=tracker.pr_id,
+                    transaction_id=tracker.transaction_id,
+                    status="completed",
+                    additional_data=additional if additional else None,
+                    publish_to_sns=True,
+                    send_to_sqs=True,
+                )
+                logger.info(
+                    "Notified consumers of report tracker update - report_id: %s, action: %s",
+                    tracker.report_id,
+                    update_data.action,
+                )
+            except Exception as notify_err:
+                logger.warning(
+                    "Failed to notify consumers for report_id %s: %s",
+                    tracker.report_id,
+                    str(notify_err),
+                )
+
         # Manually construct response to debug validation error
         return ReportTrackerResponse(
             id=tracker.id,

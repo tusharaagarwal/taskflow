@@ -2,8 +2,8 @@
 MessagingService - High-level service for Workflow Orchestrator messaging flows.
 This module provides:
 1. notify_assembler_to_start() - Tell Content Assembler to pick up a task
-2. handle_assembler_completion() - Process draft completion notification
-3. notify_consumers() - Tell consuming apps about report updates
+2. Assembler completion is handled by listeners.handle_assembler_completion
+3. notify_consumers() - Notify consumer applications about report updates (any event type)
 """
 import logging
 from datetime import datetime, timezone
@@ -207,16 +207,15 @@ class MessagingService:
         The handler receives the payload and message_id, and should return True
         if processing was successful (message will be deleted), False otherwise.
 
-        Expected incoming message format:
+        Expected incoming message format (assembler → orchestrator):
         {
-            "message_id": str,
-            "timestamp": str,
-            "type": "draft_completed",
-            "report_id": str,
-            "workflow_id": str,
-            "status": "completed" | "failed",
-            "draft_url": str (optional),
-            "error_message": str (if status is "failed")
+            "report_id": str (required),
+            "pr_id": str,
+            "transaction_id": str,
+            "content_type": str,
+            "step_name": str (e.g. "assembled_draft"),
+            "status": "completed" | "failed" (required),
+            "completed_date": str (e.g. ISO8601)
         }
 
         Args:
@@ -261,43 +260,44 @@ class MessagingService:
         self,
         report_id: str,
         event_type: str,
-        workflow_id: Optional[str] = None,
+        pr_id: Optional[str] = None,
+        transaction_id: Optional[str] = None,
         status: str = "completed",
         additional_data: Optional[Dict[str, Any]] = None,
         publish_to_sns: bool = True,
         send_to_sqs: bool = False
     ) -> Dict[str, Any]:
         """
-        Notify consuming applications about report updates.
+        Notify consumer applications about a report update.
 
-        This is called when:
-        - First draft is completed
-        - Report status changes
-        - Report is published
-        - Any other event consuming apps need to know about
+        Use this for any event that consumer apps need to know about:
+        draft completed, report published, status changes, etc. Identifiers
+        are report_id plus optional pr_id and transaction_id.
 
-        Message Format:
+        Message format:
         {
             "message_id": "msg_<timestamp>",
             "timestamp": "<ISO8601>",
             "type": "<event_type>",
             "report_id": "<report_id>",
-            "workflow_id": "<workflow_id>",
+            "pr_id": "<pr_id>",           // when provided
+            "transaction_id": "<transaction_id>",  // when provided
             "status": "<status>",
-            "data": {...additional_data}
+            "data": {...}                  // optional extra payload from additional_data
         }
 
         Args:
-            report_id: Report identifier
-            event_type: Type of event (e.g., "draft_completed", "report_published")
-            workflow_id: Optional workflow identifier
-            status: Status of the event (default: "completed")
-            additional_data: Optional extra data for consumers
-            publish_to_sns: Whether to publish to SNS topic (default: True)
-            send_to_sqs: Whether to send to SQS queue (default: False)
+            report_id: Report identifier (required).
+            event_type: Event type (e.g. "draft_completed", "report_published").
+            pr_id: Optional PR identifier.
+            transaction_id: Optional transaction identifier.
+            status: Status of the event (default "completed").
+            additional_data: Optional extra payload for consumers (stored in message["data"]).
+            publish_to_sns: Whether to publish to SNS (default True).
+            send_to_sqs: Whether to send to SQS (default False).
 
         Returns:
-            Dictionary with response information
+            Dictionary with response information.
         """
         if not settings.messaging_enabled:
             logger.warning("Messaging is disabled, skipping notify_consumers")
@@ -312,12 +312,12 @@ class MessagingService:
             "report_id": report_id,
             "status": status
         }
-
-        if workflow_id:
-            message["workflow_id"] = workflow_id
-
+        if pr_id is not None:
+            message["pr_id"] = pr_id
+        if transaction_id is not None:
+            message["transaction_id"] = transaction_id
         if additional_data:
-            message["data"] = additional_data
+            message["data"] = dict(additional_data)
 
         # Generate deduplication ID for FIFO
         dedup_id = f"consumer-{report_id}-{event_type}-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
@@ -364,37 +364,6 @@ class MessagingService:
                 result["sqs_error"] = str(e)
 
         return result
-
-    def notify_draft_completed(
-        self,
-        report_id: str,
-        workflow_id: Optional[str] = None,
-        draft_url: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Convenience method to notify consumers that the first draft is completed.
-
-        Args:
-            report_id: Report identifier
-            workflow_id: Optional workflow identifier
-            draft_url: Optional URL to the draft
-            additional_data: Optional extra data
-
-        Returns:
-            Dictionary with response information
-        """
-        data = additional_data or {}
-        if draft_url:
-            data["draft_url"] = draft_url
-
-        return self.notify_consumers(
-            report_id=report_id,
-            event_type="draft_completed",
-            workflow_id=workflow_id,
-            status="completed",
-            additional_data=data
-        )
 
 
 # Singleton instance
