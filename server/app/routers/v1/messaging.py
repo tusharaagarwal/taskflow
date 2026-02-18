@@ -1,8 +1,8 @@
 """
 Messaging API endpoints for Workflow Orchestrator.
 
-Publishing (SNS/SQS send) is done by this API. SQS consumption (assembler
-completion) runs in a separate worker process, not in-process.
+Publishing (SNS/SQS send) is done by this API. SQS assembler completion
+consumer runs in-process (app.services.sqs_consumer, started in lifespan).
 """
 
 from fastapi import APIRouter, HTTPException
@@ -17,22 +17,21 @@ router = APIRouter()
 
 @router.get("/messaging/status")
 async def get_messaging_status():
-    """Get the status of messaging services (publish-side and config).
+    """Get the status of messaging services (publish-side and in-process SQS consumer).
 
-    SQS consumption is handled by a separate worker process;
-    this endpoint reports API-side config and publish capability only.
+    Assembler completion SQS consumer runs in-process (app.services.sqs_consumer).
     """
     try:
         if not settings.messaging_enabled:
             return {
                 "status": "disabled",
                 "message": "Messaging services are disabled in configuration",
-                "sqs_worker_note": "SQS consumption runs in a separate worker when messaging is enabled",
+                "sqs_consumer_note": "Assembler completion SQS consumer runs in-process when messaging is enabled",
             }
 
         return {
             "status": "healthy",
-            "listeners": "stopped",
+            "sqs_consumer": "in_process",
             "aws_connectivity": "connected",
             "config": {
                 "region": getattr(settings, "aws_region", "ap-south-1"),
@@ -40,9 +39,8 @@ async def get_messaging_status():
                 "assembler_completion_queue": getattr(settings, "assembler_completion_queue_name", ""),
                 "consumer_notification_topic": getattr(settings, "consumer_notification_topic_name", ""),
             },
-            "sqs_worker_note": (
-                "Assembler completion SQS consumption runs in a separate worker; "
-                "scale workers independently of the API."
+            "sqs_consumer_note": (
+                "Assembler completion SQS consumer runs in-process (app.services.sqs_consumer)."
             ),
         }
     except Exception as e:

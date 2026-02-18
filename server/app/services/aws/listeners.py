@@ -1,7 +1,7 @@
 """
 Listeners for incoming AWS SQS messages.
-This module provides background listeners for:
-- Content Assembler completion notifications
+Deprecated: logic reimplemented in app.services.sqs_consumer (in-process).
+This module is kept for reference only; no new code should import from it.
 """
 import logging
 from typing import Any, Dict

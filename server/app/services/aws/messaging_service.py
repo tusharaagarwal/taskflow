@@ -202,55 +202,17 @@ class MessagingService:
         continuous: bool = True
     ) -> None:
         """
-        Start listening for draft completion notifications from Content Assembler.
-
-        The handler receives the payload and message_id, and should return True
-        if processing was successful (message will be deleted), False otherwise.
-
-        Expected incoming message format (assembler → orchestrator):
-        {
-            "report_id": str (required),
-            "pr_id": str,
-            "transaction_id": str,
-            "content_type": str,
-            "step_name": str (e.g. "assembled_draft"),
-            "status": "completed" | "failed" (required),
-            "completed_date": str (e.g. ISO8601)
-        }
-
-        Args:
-            handler: Callback function (payload, message_id) -> bool
-            continuous: If True, listen continuously; if False, poll once
+        No-op. Assembler completion is handled by app.services.sqs_consumer
+        (started in app.main lifespan). Start the API to consume messages.
         """
-        if not settings.messaging_enabled:
-            logger.warning("Messaging is disabled, skipping assembler completion listener")
-            return
-
-        queue_name = settings.assembler_completion_queue_name
-
         logger.info(
-            "Starting assembler completion listener on queue: %s (continuous=%s)",
-            queue_name,
-            continuous
+            "Assembler completion is handled by app.services.sqs_consumer (in-process). "
+            "Start the API (e.g. uvicorn app.main:app) to run the consumer."
         )
 
-        if continuous:
-            self.consumer.consume_continuously(
-                queue_name=queue_name,
-                handler=handler,
-                auto_delete=settings.sqs_auto_delete_messages
-            )
-        else:
-            self.consumer.consume_once(
-                queue_name=queue_name,
-                handler=handler,
-                auto_delete=settings.sqs_auto_delete_messages
-            )
-
     def stop_assembler_completion_listener(self) -> None:
-        """Stop the assembler completion listener."""
-        self.consumer.stop()
-        logger.info("Assembler completion listener stopped")
+        """No-op. Assembler completion consumer is stopped with the API (app.main lifespan)."""
+        logger.info("Assembler completion consumer is stopped with the API process.")
 
     # ================================================================
     # FLOW 3: Orchestrator → Consuming Applications (Notify Consumers)
