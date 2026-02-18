@@ -1,6 +1,4 @@
-"""
-Unit tests for app.db.database (get_db dependency).
-"""
+"""Unit tests for app.db.database (get_db dependency) and app.db.base_class."""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -49,3 +47,9 @@ async def test_get_db_closes_on_exception():
         with pytest.raises(ValueError, match="test"):
             await gen.athrow(ValueError("test"))
         mock_session.close.assert_called_once()
+
+
+def test_base_subclass_tablename():
+    """Base.__tablename__ returns class name lowercased."""
+    from app.models.report_tracker import ReportTracker
+    assert ReportTracker.__tablename__ == "report_tracker"

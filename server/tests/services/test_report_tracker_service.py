@@ -17,6 +17,28 @@ class TestReportTrackerServiceAdditional:
     def mock_db(self):
         return AsyncMock()
 
+    @pytest.mark.asyncio
+    async def test_create_generate_report_id_raises_value_error(self, mock_db):
+        """Create raises ValueError when _generate_unique_report_id raises."""
+        with patch.object(
+            ReportTrackerService,
+            "_generate_unique_report_id",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("abbreviation service down"),
+        ):
+            from app.schemas.report_tracker import ReportTrackerCreateRequest
+            create_data = ReportTrackerCreateRequest(
+                transaction_id="T1",
+                pr_id="PR-1",
+                content_type="Credit Opinion",
+                lob="LOB",
+                sub_lob="Sub",
+                document_type="Credit Opinion",
+                action_code="APPROVED",
+            )
+            with pytest.raises(ValueError, match="Failed to generate report_id"):
+                await ReportTrackerService.create(mock_db, create_data)
+
     def test_find_step_in_workflow_json_found(self, service):
         """Test finding a step in workflow JSON."""
         workflow = {
@@ -251,3 +273,149 @@ class TestReportTrackerServiceAdditional:
         assert result[0]["status"] == "in_progress"
         assert result[1]["step_id"] == "review"
         assert result[1]["status"] == "yet_to_start"
+
+    @pytest.mark.asyncio
+    async def test_get_status_returns_none_when_tracker_not_found(self, mock_db):
+        """get_status returns None when get_by_report_id returns None."""
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await ReportTrackerService.get_status(
+                mock_db, "nonexistent-id", include_audit=True
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_status_returns_dict_when_tracker_found(self, mock_db):
+        """get_status returns report_id and progress_tracker when tracker exists."""
+        from app.models.report_tracker import ReportTracker
+        mock_tracker = MagicMock(spec=ReportTracker)
+        mock_tracker.report_id = "R-1"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {"step_id": "draft", "status": "in_progress"},
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_status(
+                mock_db, "R-1", include_audit=False
+            )
+        assert result is not None
+        assert result["report_id"] == "R-1"
+        assert "progress_tracker" in result
+        assert len(result["progress_tracker"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_status_handles_none_workflow_steps_json(self, mock_db):
+        """get_status handles tracker with workflow_steps_json None."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-2"
+        mock_tracker.workflow_steps_json = None
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_status(mock_db, "R-2")
+        assert result["report_id"] == "R-2"
+        assert result["progress_tracker"] == []
+
+    @pytest.mark.asyncio
+    async def test_assign_user_to_step_returns_none_when_tracker_not_found(self, mock_db):
+        """assign_user_to_step returns None when report not found."""
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await ReportTrackerService.assign_user_to_step(
+                db=mock_db,
+                report_id="nonexistent",
+                stage_name="Authoring",
+                step_name="Initial Draft",
+                user_id="u1",
+                user_name="User One",
+                user_email="u1@example.com",
+                role="Analyst",
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_assign_user_to_step_raises_when_no_matching_step(self, mock_db):
+        """assign_user_to_step raises UnprocessableEntity when no in_progress step matches."""
+        from app.exceptions import UnprocessableEntityException
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-1"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {"step_id": "draft", "stage_name": "Authoring", "step_name": "Draft", "status": "completed"},
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            with pytest.raises(UnprocessableEntityException):
+                await ReportTrackerService.assign_user_to_step(
+                    db=mock_db,
+                    report_id="R-1",
+                    stage_name="Authoring",
+                    step_name="Initial Draft",
+                    user_id="u1",
+                    user_name="User One",
+                    user_email="u1@example.com",
+                    role=None,
+                )
+
+    @pytest.mark.asyncio
+    async def test_assign_user_to_step_success(self, mock_db):
+        """assign_user_to_step appends assignee and returns tracker."""
+        with patch(
+            "app.services.report_tracker_service.flag_modified",
+        ):
+            progress = [
+                {
+                    "step_id": "draft",
+                    "stage_name": "Authoring",
+                    "step_name": "Initial Draft",
+                    "status": "in_progress",
+                }
+            ]
+            mock_tracker = MagicMock()
+            mock_tracker.report_id = "R-1"
+            mock_tracker.workflow_steps_json = {"progress_tracker": progress}
+            mock_db.commit = AsyncMock()
+            mock_db.refresh = AsyncMock()
+            with patch.object(
+                ReportTrackerService,
+                "get_by_report_id",
+                new_callable=AsyncMock,
+                return_value=mock_tracker,
+            ):
+                result = await ReportTrackerService.assign_user_to_step(
+                    db=mock_db,
+                    report_id="R-1",
+                    stage_name="Authoring",
+                    step_name="Initial Draft",
+                    user_id="u1",
+                    user_name="User One",
+                    user_email="u1@example.com",
+                    role="Analyst",
+                )
+            assert result is mock_tracker
+            assert len(progress) == 1
+            assert progress[0].get("app_data", {}).get("assignee")
+            assert len(progress[0]["app_data"]["assignee"]) == 1
+            assert progress[0]["app_data"]["assignee"][0]["user_id"] == "u1"

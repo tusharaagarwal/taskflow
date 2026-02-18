@@ -103,6 +103,22 @@ class TestAbbreviation:
         assert "already exists" in response2.json()["detail"]
 
     @pytest.mark.asyncio
+    async def test_create_abbreviation_commit_raises_500(self, client, db):
+        """Create returns 500 when db.commit raises."""
+        from unittest.mock import AsyncMock
+        original_commit = db.commit
+        db.commit = AsyncMock(side_effect=RuntimeError("commit failed"))
+        try:
+            response = client.post(
+                "/abbreviation/",
+                json={"document_type": "FailDoc", "abbreviation": "FD", "is_active": True},
+            )
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "detail" in response.json()
+        finally:
+            db.commit = original_commit
+
+    @pytest.mark.asyncio
     async def test_list_abbreviations(self, client, db):
         """Test listing all abbreviations."""
         # Create test data
@@ -135,6 +151,16 @@ class TestAbbreviation:
         assert all(abbr["is_active"] for abbr in data)
 
     @pytest.mark.asyncio
+    async def test_list_abbreviations_service_raises_500(self, client, db):
+        """List abbreviations returns 500 when service raises."""
+        from unittest.mock import patch, AsyncMock
+        with patch("app.routers.v1.abbreviation.get_abbreviation_service") as m:
+            m.return_value.get_all_abbreviations = AsyncMock(side_effect=RuntimeError("db error"))
+            response = client.get("/abbreviation/")
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
     async def test_get_abbreviation_by_document_type(self, client, db):
         """Test getting abbreviation by document type."""
         # Create test data
@@ -160,6 +186,19 @@ class TestAbbreviation:
         response = client.get("/abbreviation/Nonexistent")
         assert response.status_code == status.HTTP_404_NOT_FOUND
         assert "not found" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_get_abbreviation_by_document_type_db_raises_500(self, client, db):
+        """Get by document_type returns 500 when db raises."""
+        from unittest.mock import AsyncMock
+        original_execute = db.execute
+        db.execute = AsyncMock(side_effect=RuntimeError("db error"))
+        try:
+            response = client.get("/abbreviation/AnyDoc")
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            assert "detail" in response.json()
+        finally:
+            db.execute = original_execute
 
     @pytest.mark.asyncio
     async def test_update_abbreviation(self, client, db):
@@ -259,6 +298,16 @@ class TestAbbreviation:
         assert data["document_type"] == "Nonexistent"
         assert data["abbreviation"] == ""
         assert data["found"] is False
+
+    @pytest.mark.asyncio
+    async def test_lookup_abbreviation_service_raises_500(self, client, db):
+        """Lookup returns 500 when service raises non-ValueError."""
+        from unittest.mock import patch, AsyncMock
+        with patch("app.routers.v1.abbreviation.get_abbreviation_service") as m:
+            m.return_value.get_abbreviation = AsyncMock(side_effect=RuntimeError("db error"))
+            response = client.post("/abbreviation/lookup", json={"document_type": "Any"})
+        assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "detail" in response.json()
 
     @pytest.mark.asyncio
     async def test_get_cache_stats(self, client):

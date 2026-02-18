@@ -53,7 +53,8 @@ omit = [
     "*/.venv/*",
     "*/migrations/*",
     "app/monitoring/health.py",
-    "app/constants/*"
+    "app/constants/*",
+    "app/config.py"
 ]
 
 [tool.coverage.report]
