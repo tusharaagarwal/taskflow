@@ -2,7 +2,7 @@
 MessagingService - High-level service for Workflow Orchestrator messaging flows.
 This module provides:
 1. notify_assembler_to_start() - Tell Content Assembler to pick up a task
-2. Assembler completion is handled by listeners.handle_assembler_completion
+2. Assembler completion is handled by app.services.sqs_consumer (in-process, FastAPI lifespan)
 3. notify_consumers() - Notify consumer applications about report updates (any event type)
 """
 import logging
@@ -204,7 +204,30 @@ class MessagingService:
         """
         No-op. Assembler completion is handled by app.services.sqs_consumer
         (started in app.main lifespan). Start the API to consume messages.
+        Start listening for draft completion notifications from Content Assembler.
+
+        The handler receives the payload and message_id, and should return True
+        if processing was successful (message will be deleted), False otherwise.
+
+        Expected incoming message format (assembler → orchestrator):
+        {
+            "report_id": str (required),
+            "pr_id": str,
+            "transaction_id": str,
+            "content_type": str,
+            "step_name": str (e.g. "assembled_draft"),
+            "status": "completed" | "failed" (required),
+            "completed_date": str (e.g. ISO8601)
+        }
+
+        Args:
+            handler: Callback function (payload, message_id) -> bool
+            continuous: If True, listen continuously; if False, poll once
         """
+        if not settings.messaging_enabled:
+            logger.warning("Messaging is disabled, skipping assembler completion listener")
+            return
+
         logger.info(
             "Assembler completion is handled by app.services.sqs_consumer (in-process). "
             "Start the API (e.g. uvicorn app.main:app) to run the consumer."

@@ -448,3 +448,4 @@ if __name__ == "__main__":
     finally:
         consumer.print_stats()
     logger.info("Exited.")
+
