@@ -1,0 +1,22 @@
+{
+  "database_host": "localhost",
+  "database_port": 5432,
+  "database_name": "workflow_orchestrator_qa",
+  "database_user": "workflow_user",
+  "database_password": "placeholder-will-be-overridden-by-secrets-manager",
+  "secret_key": "placeholder-will-be-overridden-by-secrets-manager",
+  "debug": false,
+  "jwt_algorithm": "HS256",
+  "expire_minutes": 20,
+  "environment": "qa",
+  "cors_origins": [
+    "https://[QA-CLOUDFRONT-URL-TO-BE-PROVIDED]",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:8080",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8080"
+  ]
+}
+

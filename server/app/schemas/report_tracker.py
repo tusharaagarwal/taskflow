@@ -185,7 +185,8 @@ class ReportTrackerUpdateRequest(BaseModel):
     3. Both: perform action AND update app_data
     
     At least one of 'action' or 'app_data' must be provided.
-    
+    Assembler completion flow uses action="accept" with optional app_data.
+
     Attributes:
         action: Optional workflow action type (forward/backward/special)
         path: Optional path for dynamic transition resolution

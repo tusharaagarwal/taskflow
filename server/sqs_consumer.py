@@ -4,6 +4,7 @@ Consumes messages from AWS SQS queue and processes them through the agent
 """
 
 import json
+import os
 import boto3
 import signal
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from app.utils.security import sanitize_log_input
 
 logger = logging.getLogger("sqs_consumer")
+_credentials_tip_logged = False
 
 
 def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
@@ -38,11 +40,11 @@ def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
                 return json.load(f)
         else:
             # codeql[py/log-injection]
-            logger.warning(f"⚠ Config file not found: {sanitize_log_input(str(config_path))}")
+            logger.warning(f"[WARN] Config file not found: {sanitize_log_input(str(config_path))}")
             return {}
     except Exception as e:
         # codeql[py/log-injection]
-        logger.warning(f"⚠ Error loading config file: {sanitize_log_input(str(e))}")
+        logger.warning(f"[WARN] Error loading config file: {sanitize_log_input(str(e))}")
         return {}
 
 
@@ -51,7 +53,7 @@ class SQSMessageConsumer:
     
     def __init__(
         self,
-        region: str = "ap-south-2",
+        region: str = "ap-south-1",
         aws_access_key_id: Optional[str] = None,
         aws_secret_access_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
@@ -61,7 +63,7 @@ class SQSMessageConsumer:
         Initialize the message consumer for AWS
         
         Args:
-            region: AWS region (default: ap-south-2)
+            region: AWS region (default: ap-south-1)
             aws_access_key_id: AWS access key (None to use default credentials)
             aws_secret_access_key: AWS secret key (None to use default credentials)
             aws_session_token: AWS session token (for temporary credentials)
@@ -95,13 +97,13 @@ class SQSMessageConsumer:
         }
         
         # codeql[py/log-injection]
-        logger.info(f"✅ SQS Consumer initialized for region: {sanitize_log_input(region)}")
-    
+        logger.info(f"[OK] SQS Consumer initialized for region: {sanitize_log_input(region)}")
+
     def stop(self):
         """Stop the consumer gracefully"""
         self.running = False
-        logger.info("🛑 Consumer stop requested")
-    
+        logger.info("[STOP] Consumer stop requested")
+
     def receive_messages(
         self,
         queue_name: str,
@@ -128,7 +130,17 @@ class SQSMessageConsumer:
                 queue_url = response['QueueUrl']
             except Exception as e:
                 # codeql[py/log-injection]
-                logger.error(f"✗ Error getting queue URL: {sanitize_log_input(str(e))}")
+                logger.error(f"[ERROR] Error getting queue URL: {sanitize_log_input(str(e))}")
+                global _credentials_tip_logged
+                err_msg = str(e)
+                if ("InvalidClientTokenId" in err_msg or "security token" in err_msg.lower() or "expired" in err_msg.lower()) and not _credentials_tip_logged:
+                    _credentials_tip_logged = True
+                    logger.info(
+                        "Tip: Credentials invalid/expired. "
+                        "1) Run: aws sso login --profile YOUR_AWS_SSO_PROFILE  "
+                        "2) From repo root: .\\scripts\\refresh_aws_credentials.ps1 -Profile YOUR_AWS_SSO_PROFILE  "
+                        "3) Restart this consumer (Ctrl+C then run again)."
+                    )
                 return []
             
             # Receive messages
@@ -148,9 +160,9 @@ class SQSMessageConsumer:
             
         except Exception as e:
             # codeql[py/log-injection]
-            logger.error(f"✗ Error receiving messages from queue '{sanitize_log_input(queue_name)}': {sanitize_log_input(str(e))}")
+            logger.error(f"[ERROR] Error receiving messages from queue '{sanitize_log_input(queue_name)}': {sanitize_log_input(str(e))}")
             return []
-    
+
     def extract_message_content(self, message: Dict[str, Any]) -> str:
         """
         Extract the actual message content from SQS message
@@ -218,7 +230,7 @@ class SQSMessageConsumer:
             
         except Exception as e:
             # codeql[py/log-injection]
-            logger.error(f"✗ Error processing message: {sanitize_log_input(str(e))}")
+            logger.error(f"[ERROR] Error processing message: {sanitize_log_input(str(e))}")
             self.stats['failed'] += 1
             return False
     
@@ -253,9 +265,9 @@ class SQSMessageConsumer:
             
         except Exception as e:
             # codeql[py/log-injection]
-            logger.error(f"✗ Error deleting message: {sanitize_log_input(str(e))}")
+            logger.error(f"[ERROR] Error deleting message: {sanitize_log_input(str(e))}")
             return False
-    
+
     def consume_continuously(
         self,
         queue_name: str,
@@ -301,21 +313,21 @@ class SQSMessageConsumer:
                             receipt_handle = message.get('ReceiptHandle')
                             if receipt_handle:
                                 if self.delete_message(queue_name, receipt_handle):
-                                    logger.info(f"✓ Message deleted")
+                                    logger.info("Message deleted")
                         elif not auto_delete:
-                            logger.info(f"⚠ Message NOT deleted (auto_delete=False)")
-                
+                            logger.info("[WARN] Message NOT deleted (auto_delete=False)")
+
                 # Wait before next poll (only if not using long polling)
                 if wait_time_seconds == 0:
                     time.sleep(poll_interval)
                     
             except KeyboardInterrupt:
-                logger.info("\n⚠ Received interrupt signal, stopping...")
+                logger.info("\n[WARN] Received interrupt signal, stopping...")
                 self.running = False
                 break
             except Exception as e:
                 # codeql[py/log-injection]
-                logger.error(f"✗ Error in consumption loop: {sanitize_log_input(str(e))}")
+                logger.error(f"[ERROR] Error in consumption loop: {sanitize_log_input(str(e))}")
                 time.sleep(poll_interval)
     
     def get_stats(self) -> Dict[str, int]:
@@ -353,12 +365,73 @@ def create_consumer_from_config(
     if not config:
         logger.error("Failed to load AWS configuration")
         return None
-    
+
+    # Prefer env vars (e.g. after refresh_aws_credentials or SSO), then config file, then None = boto3 default chain
+    creds = config.get("credentials") or {}
+    aws_access_key_id = (os.environ.get("AWS_ACCESS_KEY_ID") or (creds.get("access_key_id") or "").strip() or None)
+    aws_secret_access_key = (os.environ.get("AWS_SECRET_ACCESS_KEY") or (creds.get("secret_access_key") or "").strip() or None)
+    aws_session_token = (os.environ.get("AWS_SESSION_TOKEN") or (creds.get("session_token") or "").strip() or None)
+
     return SQSMessageConsumer(
-        region=config.get('region', 'ap-south-2'),
-        aws_access_key_id=config.get('credentials', {}).get('access_key_id'),
-        aws_secret_access_key=config.get('credentials', {}).get('secret_access_key'),
-        aws_session_token=config.get('credentials', {}).get('session_token'),
+        region=config.get('region', 'ap-south-1'),
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key,
+        aws_session_token=aws_session_token,
         message_handler=message_handler
     )
 
+
+def _configure_logging() -> None:
+    """Configure logging so output appears in the terminal."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+        force=True,
+    )
+    logging.getLogger("botocore").setLevel(logging.WARNING)
+    logging.getLogger("boto3").setLevel(logging.WARNING)
+
+
+if __name__ == "__main__":
+    import argparse
+    _configure_logging()
+
+    parser = argparse.ArgumentParser(description="SQS consumer (standalone). Consumes from queue in aws_config.json.")
+    parser.add_argument("--config-file", default="aws_config.json", help="Path to AWS config JSON")
+    parser.add_argument("--queue", help="Queue name (default: from config resources.sqs_queue)")
+    parser.add_argument("--wait-time", type=int, default=20, help="Long polling wait time in seconds")
+    args = parser.parse_args()
+
+    config = load_aws_config(args.config_file)
+    if not config:
+        print("Error: Could not load AWS config. Check aws_config.json and credentials.", file=sys.stderr)
+        sys.exit(1)
+
+    queue_name = args.queue or config.get("resources", {}).get("sqs_queue")
+    if not queue_name:
+        print("Error: No queue name. Set --queue or resources.sqs_queue in config.", file=sys.stderr)
+        sys.exit(1)
+
+    consumer = create_consumer_from_config(args.config_file)
+    if not consumer:
+        sys.exit(1)
+
+    def _shutdown(*_):
+        consumer.stop()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    logger.info("Starting SQS consumer (Ctrl+C to stop)")
+    logger.info("Queue: %s", queue_name)
+    try:
+        consumer.consume_continuously(
+            queue_name=queue_name,
+            wait_time_seconds=args.wait_time,
+            auto_delete=True,
+        )
+    finally:
+        consumer.print_stats()
+    logger.info("Exited.")
