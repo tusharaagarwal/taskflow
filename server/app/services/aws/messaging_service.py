@@ -2,7 +2,7 @@
 MessagingService - High-level service for Workflow Orchestrator messaging flows.
 This module provides:
 1. notify_assembler_to_start() - Tell Content Assembler to pick up a task
-2. Assembler completion is handled by listeners.handle_assembler_completion
+2. Assembler completion is handled by app.services.sqs_consumer (in-process, FastAPI lifespan)
 3. notify_consumers() - Notify consumer applications about report updates (any event type)
 """
 import logging
@@ -202,6 +202,8 @@ class MessagingService:
         continuous: bool = True
     ) -> None:
         """
+        No-op. Assembler completion is handled by app.services.sqs_consumer
+        (started in app.main lifespan). Start the API to consume messages.
         Start listening for draft completion notifications from Content Assembler.
 
         The handler receives the payload and message_id, and should return True
@@ -226,31 +228,14 @@ class MessagingService:
             logger.warning("Messaging is disabled, skipping assembler completion listener")
             return
 
-        queue_name = settings.assembler_completion_queue_name
-
         logger.info(
-            "Starting assembler completion listener on queue: %s (continuous=%s)",
-            queue_name,
-            continuous
+            "Assembler completion is handled by app.services.sqs_consumer (in-process). "
+            "Start the API (e.g. uvicorn app.main:app) to run the consumer."
         )
 
-        if continuous:
-            self.consumer.consume_continuously(
-                queue_name=queue_name,
-                handler=handler,
-                auto_delete=settings.sqs_auto_delete_messages
-            )
-        else:
-            self.consumer.consume_once(
-                queue_name=queue_name,
-                handler=handler,
-                auto_delete=settings.sqs_auto_delete_messages
-            )
-
     def stop_assembler_completion_listener(self) -> None:
-        """Stop the assembler completion listener."""
-        self.consumer.stop()
-        logger.info("Assembler completion listener stopped")
+        """No-op. Assembler completion consumer is stopped with the API (app.main lifespan)."""
+        logger.info("Assembler completion consumer is stopped with the API process.")
 
     # ================================================================
     # FLOW 3: Orchestrator → Consuming Applications (Notify Consumers)

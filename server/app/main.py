@@ -12,6 +12,7 @@ from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
 from app.utils.security import sanitize_log_input
 from app.config.config import settings
+from app.services.sqs_consumer import sqs_consumer
 
 # Pydantic models
 class WorkflowBase(BaseModel):
@@ -43,12 +44,27 @@ start_time = time.time()
 async def lifespan(app: FastAPI):
     """Application lifespan events.
 
-    SQS consumption (assembler completion) runs in a separate worker process
-    (worker_sqs.py); messaging_enabled is still used for publish-side guards
-    in API and services.
+    SQS assembler completion consumer runs in-process (app.services.sqs_consumer),
+    started here when messaging_enabled is True.
     """
     logger.info("Application starting up", extra={"event": "startup"})
+
+    if settings.messaging_enabled:
+        try:
+            await sqs_consumer.start()
+            logger.info("SQS consumer started successfully")
+        except Exception as e:
+            logger.error("Failed to start SQS consumer: %s", e)
+
     yield
+
+    if settings.messaging_enabled:
+        try:
+            await sqs_consumer.stop()
+            logger.info("SQS consumer stopped")
+        except Exception as e:
+            logger.error("Error stopping SQS consumer: %s", e)
+
     logger.info("Application shutting down", extra={"event": "shutdown"})
 
 

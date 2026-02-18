@@ -1,10 +1,6 @@
 """
 MessageConsumer - Utility class for consuming messages from AWS SQS.
 This implementation follows the exact patterns from snssqs/consume_messages 4.py
-
-DEPRECATED: This module is deprecated. A copy is kept for reference in
-server/deprecated/aws_consumer_deprecated.py. Assembler completion is now handled
-by app/services/sqs_consumer.py (in-process, started in FastAPI lifespan).
 """
 import json
 import logging
@@ -43,39 +39,6 @@ class MessageConsumer:
     This class provides methods to receive, process, and delete messages
     from AWS SQS queues. It supports both single-poll and continuous
     consumption modes.
-
-    The consumer expects messages in the following formats:
-
-    1. Direct SQS message:
-       {
-           "message_id": str,
-           "timestamp": str,
-           "type": str,
-           "data": {...}
-       }
-
-    2. SNS notification (forwarded to SQS):
-       {
-           "Type": "Notification",
-           "TopicArn": str,
-           "Subject": str,
-           "Message": "<JSON string of actual payload>",
-           "Timestamp": str
-       }
-
-    Usage:
-        consumer = MessageConsumer()
-
-        # Define a message handler
-        def my_handler(payload: Dict, message_id: str) -> bool:
-            print(f"Processing: {payload}")
-            return True  # Return True if processed successfully
-
-        # Consume once
-        consumer.consume_once(queue_name="my-queue", handler=my_handler)
-
-        # Consume continuously
-        consumer.consume_continuously(queue_name="my-queue", handler=my_handler)
     """
 
     def __init__(
@@ -85,39 +48,25 @@ class MessageConsumer:
         aws_secret_access_key: Optional[str] = None,
         aws_session_token: Optional[str] = None
     ) -> None:
-        """
-        Initialize the message consumer for AWS.
-
-        Args:
-            region: AWS region (defaults to settings.aws_region)
-            aws_access_key_id: AWS access key (defaults to settings.aws_access_key_id)
-            aws_secret_access_key: AWS secret key (defaults to settings.aws_secret_access_key)
-            aws_session_token: AWS session token (defaults to settings.aws_session_token)
-        """
         self.region = region or settings.aws_region
         self.aws_access_key_id = aws_access_key_id or settings.aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key or settings.aws_secret_access_key
         self.aws_session_token = aws_session_token or settings.aws_session_token
 
-        # Consumer state
         self.running = True
 
-        # Prepare client configuration
         self._client_config: Dict[str, Any] = {
             'region_name': self.region
         }
 
-        # Add credentials if provided
         if self.aws_access_key_id and self.aws_secret_access_key:
             self._client_config['aws_access_key_id'] = self.aws_access_key_id
             self._client_config['aws_secret_access_key'] = self.aws_secret_access_key
             if self.aws_session_token:
                 self._client_config['aws_session_token'] = self.aws_session_token
 
-        # Initialize client (lazy initialization)
         self._sqs_client: Optional[Any] = None
 
-        # Statistics tracking
         self.stats: Dict[str, int] = {
             'received': 0,
             'processed': 0,
@@ -125,7 +74,6 @@ class MessageConsumer:
             'deleted': 0
         }
 
-        # Queue URL cache
         self._queue_url_cache: Dict[str, str] = {}
 
         logger.info(
@@ -135,24 +83,11 @@ class MessageConsumer:
 
     @property
     def sqs_client(self) -> Any:
-        """Lazy initialization of SQS client."""
         if self._sqs_client is None:
             self._sqs_client = boto3.client('sqs', **self._client_config)
         return self._sqs_client
 
     def _get_queue_url(self, queue_name: str) -> str:
-        """
-        Get queue URL from queue name with caching.
-
-        Args:
-            queue_name: Name of the SQS queue
-
-        Returns:
-            Queue URL string
-
-        Raises:
-            QueueNotFoundError: If queue is not found
-        """
         if queue_name in self._queue_url_cache:
             return self._queue_url_cache[queue_name]
 
@@ -167,80 +102,23 @@ class MessageConsumer:
             raise
 
     def _extract_payload(self, body_json: Any) -> Dict[str, Any]:
-        """
-        Extract the actual payload from message body.
-
-        Handles both direct SQS messages and SNS notifications forwarded to SQS.
-
-        SNS Notification format:
-        {
-            "Type": "Notification",
-            "TopicArn": "arn:aws:sns:...",
-            "Subject": "...",
-            "Message": "<JSON string>",  # <-- The actual payload is here
-            "Timestamp": "..."
-        }
-
-        Direct SQS format:
-        {
-            "message_id": "...",
-            "timestamp": "...",
-            "type": "...",
-            "data": {...}
-        }
-
-        Args:
-            body_json: Parsed JSON body from message
-
-        Returns:
-            Extracted payload dictionary
-        """
-        # Check if this is an SNS notification
         if isinstance(body_json, dict) and body_json.get('Type') == 'Notification':
             sns_message = body_json.get('Message', '{}')
 
-            # If Message is already a dict, return it
             if isinstance(sns_message, dict):
                 return sns_message
 
-            # Parse the Message JSON string
             try:
                 return json.loads(sns_message)
             except json.JSONDecodeError:
                 return {'raw_message': sns_message}
 
-        # Direct SQS message
         if isinstance(body_json, dict):
             return body_json
 
         return {'raw_body': body_json}
 
     def _extract_job_fields(self, payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
-        """
-        Extract job-related fields from payload.
-
-        Expected payload structures:
-
-        Structure 1 (nested tracker):
-        {
-            "tracker": {"report_id": str, "workflow_id": str},
-            "create_data": {"content_product_name": str},
-            "payload_id": str
-        }
-
-        Structure 2 (flat):
-        {
-            "report_id": str,
-            "workflow_id": str,
-            "cpm_id": str
-        }
-
-        Args:
-            payload: Message payload dictionary
-
-        Returns:
-            Dictionary with extracted fields: report_id, workflow_id, cpm_id
-        """
         tracker = payload.get('tracker') or {}
         create_data = payload.get('create_data') or {}
 
@@ -265,18 +143,6 @@ class MessageConsumer:
         wait_time_seconds: Optional[int] = None,
         visibility_timeout: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Receive messages from SQS queue.
-
-        Args:
-            queue_name: Name of the SQS queue
-            max_messages: Maximum number of messages to receive (1-10, defaults to settings)
-            wait_time_seconds: Long polling wait time (defaults to settings)
-            visibility_timeout: Visibility timeout for received messages (defaults to settings)
-
-        Returns:
-            List of message dictionaries from SQS
-        """
         max_messages = max_messages or settings.sqs_max_messages
         wait_time_seconds = wait_time_seconds or settings.sqs_wait_time_seconds
         visibility_timeout = visibility_timeout or settings.sqs_visibility_timeout
@@ -296,12 +162,6 @@ class MessageConsumer:
             messages = response.get('Messages', [])
             self.stats['received'] += len(messages)
 
-            logger.debug(
-                "Received %d messages from queue '%s'",
-                len(messages),
-                queue_name
-            )
-
             return messages
 
         except QueueNotFoundError:
@@ -320,35 +180,17 @@ class MessageConsumer:
         message: Dict[str, Any],
         handler: Optional[Callable[[Dict[str, Any], str], bool]] = None
     ) -> bool:
-        """
-        Process a single message.
-
-        Args:
-            message: Raw SQS message dictionary containing:
-                     - MessageId: str
-                     - Body: str (JSON)
-                     - ReceiptHandle: str
-                     - MessageAttributes: dict (optional)
-            handler: Optional callback function that receives (payload, message_id)
-                    and returns True if processing successful
-
-        Returns:
-            True if processing successful, False otherwise
-        """
         try:
             message_id = message.get('MessageId', 'unknown')
             body = message.get('Body', '{}')
 
-            # Parse message body
             try:
                 body_json = json.loads(body)
             except json.JSONDecodeError:
                 body_json = {'raw_body': body}
 
-            # Extract actual payload
             payload = self._extract_payload(body_json)
 
-            # Log message details
             if isinstance(body_json, dict) and body_json.get('Type') == 'Notification':
                 logger.info(
                     "Processing SNS Message (ID: %s) from topic: %s",
@@ -361,7 +203,6 @@ class MessageConsumer:
                     message_id
                 )
 
-            # Call handler if provided
             if handler:
                 success = handler(payload, message_id)
                 if success:
@@ -371,7 +212,6 @@ class MessageConsumer:
                     self.stats['failed'] += 1
                     return False
 
-            # Default processing: extract job fields and log
             job_fields = self._extract_job_fields(payload)
             report_id = job_fields['report_id']
             workflow_id = job_fields['workflow_id']
@@ -400,16 +240,6 @@ class MessageConsumer:
             return False
 
     def delete_message(self, queue_name: str, receipt_handle: str) -> bool:
-        """
-        Delete a message from the queue.
-
-        Args:
-            queue_name: Name of the SQS queue
-            receipt_handle: Receipt handle of the message to delete
-
-        Returns:
-            True if deletion successful, False otherwise
-        """
         try:
             queue_url = self._get_queue_url(queue_name)
 
@@ -437,18 +267,6 @@ class MessageConsumer:
         auto_delete: Optional[bool] = None,
         max_messages: Optional[int] = None
     ) -> int:
-        """
-        Consume messages once (single poll).
-
-        Args:
-            queue_name: Name of the SQS queue
-            handler: Optional callback function for processing messages
-            auto_delete: Whether to automatically delete processed messages
-            max_messages: Maximum number of messages to receive
-
-        Returns:
-            Number of messages processed successfully
-        """
         auto_delete = auto_delete if auto_delete is not None else settings.sqs_auto_delete_messages
 
         logger.info("Polling queue once: %s", queue_name)
@@ -487,20 +305,6 @@ class MessageConsumer:
         wait_time_seconds: Optional[int] = None,
         poll_interval: Optional[int] = None
     ) -> None:
-        """
-        Continuously consume messages from queue.
-
-        This method runs in a loop until `self.running` is set to False
-        or a keyboard interrupt is received.
-
-        Args:
-            queue_name: Name of the SQS queue
-            handler: Optional callback function for processing messages
-            auto_delete: Whether to automatically delete processed messages
-            max_messages: Maximum number of messages to receive per poll
-            wait_time_seconds: Long polling wait time
-            poll_interval: Interval between polls (seconds) when not using long polling
-        """
         auto_delete = auto_delete if auto_delete is not None else settings.sqs_auto_delete_messages
         wait_time_seconds = wait_time_seconds or settings.sqs_wait_time_seconds
         poll_interval = poll_interval or settings.sqs_poll_interval
@@ -543,7 +347,6 @@ class MessageConsumer:
                         datetime.now(timezone.utc).strftime('%H:%M:%S')
                     )
 
-                # Wait before next poll if not using long polling
                 if wait_time_seconds == 0:
                     time.sleep(poll_interval)
 
@@ -572,16 +375,9 @@ class MessageConsumer:
         }
 
     def get_stats(self) -> Dict[str, int]:
-        """
-        Get consumption statistics.
-
-        Returns:
-            Dictionary with keys: received, processed, failed, deleted
-        """
         return self.stats.copy()
 
     def print_stats(self) -> None:
-        """Print consumption statistics to logger."""
         logger.info("=" * 60)
         logger.info("CONSUMPTION STATISTICS")
         logger.info("=" * 60)
@@ -592,17 +388,10 @@ class MessageConsumer:
         logger.info("=" * 60)
 
 
-# Singleton instance for convenience
 _consumer_instance: Optional[MessageConsumer] = None
 
 
 def get_consumer() -> MessageConsumer:
-    """
-    Get the singleton MessageConsumer instance.
-
-    Returns:
-        MessageConsumer: The singleton consumer instance
-    """
     global _consumer_instance
     if _consumer_instance is None:
         _consumer_instance = MessageConsumer()

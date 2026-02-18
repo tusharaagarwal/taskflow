@@ -6,6 +6,20 @@ from fastapi.testclient import TestClient
 from app.main import app, workflows_db, workflow_counter
 
 
+class TestRootEndpoint:
+    """Test root ping endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        return TestClient(app)
+
+    def test_ping_returns_pong(self, client):
+        """GET / returns Pong."""
+        response = client.get("/")
+        assert response.status_code == 200
+        assert response.json() == "Pong"
+
+
 class TestWorkflowEndpoints:
     """Tests for workflow CRUD endpoints."""
 

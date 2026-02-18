@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 # Import after setting up the path
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.main import app as main_app
 from app.db.database import Base, get_db
 from app.models.content_product import ContentProduct
@@ -142,7 +142,7 @@ ContentProduct.get_workflow_json = mock_get_workflow_json
 # Update the base path for the config
 config.base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-# Mock CPM + workflow service calls for create flow
+# Mock CPM + workflow service calls for create flow; disable messaging to avoid boto3/SNS/SQS timeouts (~30s+ per request)
 @pytest.fixture(autouse=True)
 def mock_cpm_and_workflow(monkeypatch):
     async def mock_get_cpm_by_filters(lob: str, sub_lob: str, cp_name: str):
@@ -158,12 +158,23 @@ def mock_cpm_and_workflow(monkeypatch):
     from app.services.report_tracker_service import ReportTrackerService
     async def mock_generate_id(db, document_type):
         import uuid
-        # Return a deterministic ID for tests based on document_type but unique
         prefix = "CO" if "Credit" in document_type else "RPT"
         random_suffix = uuid.uuid4().hex[:6].upper()
         return f"{prefix}-{random_suffix}"
     
     monkeypatch.setattr(ReportTrackerService, "_generate_unique_report_id", mock_generate_id)
+
+    # Disable messaging so create/update never call real SNS/SQS (avoids 30s+ timeouts per request)
+    from app.config.config import settings as app_settings
+    monkeypatch.setattr(app_settings, "messaging_enabled", False)
+    # Also mock get_messaging_service at source so router's lazy import gets it (no boto3)
+    mock_messaging = MagicMock()
+    mock_messaging.notify_assembler_to_start.return_value = {}
+    mock_messaging.notify_consumers.return_value = {}
+    monkeypatch.setattr(
+        "app.services.aws.messaging_service.get_messaging_service",
+        lambda: mock_messaging,
+    )
 
 # This event_loop fixture is required for async tests
 @pytest.fixture
@@ -176,29 +187,49 @@ def event_loop():
 # Test database setup
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
+# Reuse one engine for the whole module to avoid repeated create_all/drop_all (major speedup)
+_engine_cache = None
+
+
 @pytest_asyncio.fixture(scope="function")
 async def engine():
-    engine = create_async_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-        execution_options={"schema_translate_map": {"public": None}},
-    )
-    async with engine.begin() as conn:
-        # Drop all tables first to ensure a clean state
-        await conn.run_sync(Base.metadata.drop_all)
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    await engine.dispose()
+    """Reused engine; schema created once on first use."""
+    global _engine_cache
+    if _engine_cache is None:
+        _engine_cache = create_async_engine(
+            SQLALCHEMY_DATABASE_URL,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+            execution_options={"schema_translate_map": {"public": None}},
+        )
+        async with _engine_cache.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+    yield _engine_cache
+
 
 @pytest_asyncio.fixture(scope="function")
 async def db(engine):
+    """Per-test session; clears report_tracker/content_product/workflow so each test starts clean."""
     async with async_sessionmaker(
         autocommit=False, autoflush=False, bind=engine, class_=AsyncSession
     )() as session:
+        # Clear data so each test gets a clean state (fast vs drop_all/create_all)
+        for table in ("report_tracker", "content_product", "workflow"):
+            try:
+                await session.execute(text(f"DELETE FROM {table}"))
+            except Exception:
+                pass
+        await session.commit()
         yield session
         await session.rollback()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_with_content_products(db):
+    """Session with content_product and workflow test data already loaded. Use instead of db when test needs CP."""
+    await _create_test_content_products(db)
+    return db
 
 # Helper function to create test content products
 async def _create_test_workflow_table(db):
@@ -207,36 +238,22 @@ async def _create_test_workflow_table(db):
     pass
 
 async def _create_test_content_products(db):
-    """Create content products table and add test data."""
-    # First create the workflow table
+    """Create content products table and add test data. Single commit at end for speed."""
     await _create_test_workflow_table(db)
-    
-    # Create content_products table if it doesn't exist
     result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='content_product'"))
     if not result.scalar():
         await db.execute(text("""
             CREATE TABLE content_product (
-                id INTEGER NOT NULL, 
-                name VARCHAR, 
-                workflow_id INTEGER, 
-                PRIMARY KEY (id)
+                id INTEGER NOT NULL, name VARCHAR, workflow_id INTEGER, PRIMARY KEY (id)
             )
         """))
-        await db.commit()
-    
-    # Clear existing data
     await db.execute(text("DELETE FROM content_product"))
-    await db.commit()
-    
-    # Add test data
     for cp in SAMPLE_CONTENT_PRODUCTS:
         await db.execute(
             text("INSERT INTO content_product (id, name, workflow_id) VALUES (:id, :name, :workflow_id)"),
-            {"id": cp["id"], "name": cp["name"], "workflow_id": cp["workflow_id"]}
+            {"id": cp["id"], "name": cp["name"], "workflow_id": cp["workflow_id"]},
         )
     await db.commit()
-    
-    # Return the created products
     result = await db.execute(text("SELECT * FROM content_product"))
     return [dict(row) for row in result.mappings()]
 
@@ -259,29 +276,10 @@ async def client(db):
     mock_app.dependency_overrides.clear()
 
 @pytest_asyncio.fixture(scope="function")
-async def sample_report_tracker(db):
-    # First ensure we have content products
-    await _create_test_content_products(db)
-    
-    # Ensure the report_tracker table exists
-    result = await db.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='report_tracker'"))
-    if not result.scalar():
-        await db.execute(text("""
-            CREATE TABLE report_tracker (
-                id INTEGER NOT NULL, 
-                report_id VARCHAR, 
-                workflow_json TEXT, 
-                workflow_steps_json TEXT, 
-                created_at DATETIME, 
-                updated_at DATETIME, 
-                PRIMARY KEY (id), 
-                UNIQUE (report_id)
-            )
-        
-        """))
-        await db.commit()
-    
-    # Clear existing data
+async def sample_report_tracker(db_with_content_products):
+    """Pre-seeded report tracker; uses db_with_content_products so CP already exists."""
+    db = db_with_content_products
+    # Clear existing report_tracker rows only (tables exist from engine create_all)
     await db.execute(text("DELETE FROM report_tracker"))
     await db.commit()
     
@@ -304,10 +302,7 @@ async def sample_report_tracker(db):
 # Tests
 class TestReportTracker:
     @pytest.mark.asyncio
-    async def test_create_report_tracker(self, client, db):
-        # First ensure we have content products
-        await _create_test_content_products(db)
-        
+    async def test_create_report_tracker(self, client, db_with_content_products):
         # Test data
         # Test data - Updated to new schema
         report_data = {
@@ -333,11 +328,126 @@ class TestReportTracker:
         assert "workflow_steps_json" in data
 
     @pytest.mark.asyncio
-    async def test_get_report_tracker(self, client, db):
-        # First ensure we have content products
-        await _create_test_content_products(db)
-        
-        # First create a report
+    async def test_create_report_tracker_value_error_404(self, client, db_with_content_products):
+        """Create returns 404 when service raises ValueError (e.g. content product not found)."""
+        from unittest.mock import patch, AsyncMock
+        from app.services.report_tracker_service import ReportTrackerService
+        report_data = {
+            "transaction_id": "TXN-12345",
+            "pr_id": "PR-12345",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        with patch.object(
+            ReportTrackerService,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Content product not found"),
+        ):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_create_report_tracker_generic_exception_400(self, client, db_with_content_products):
+        """Create returns 400 when service raises generic Exception."""
+        from unittest.mock import patch, AsyncMock
+        from app.services.report_tracker_service import ReportTrackerService
+        report_data = {
+            "transaction_id": "TXN-12345",
+            "pr_id": "PR-12345",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        with patch.object(
+            ReportTrackerService,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Unexpected error"),
+        ):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_create_report_tracker_with_messaging_enabled(self, client, db_with_content_products):
+        """Create succeeds when messaging_enabled is True and get_messaging_service is mocked."""
+        from unittest.mock import patch
+        from app.config.config import settings
+        report_data = {
+            "transaction_id": "TXN-MSG",
+            "pr_id": "PR-MSG",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        with patch.object(settings, "messaging_enabled", True):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert "report_id" in data
+        assert "workflow_steps_json" in data
+
+    @pytest.mark.asyncio
+    async def test_create_report_tracker_messaging_notify_raises_still_returns_201(self, client, db_with_content_products):
+        """Create returns 201 when messaging_enabled True but notify_assembler_to_start raises (exception logged)."""
+        from unittest.mock import patch, MagicMock
+        from app.config.config import settings
+        report_data = {
+            "transaction_id": "TXN-MSG2",
+            "pr_id": "PR-MSG2",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        mock_messaging = MagicMock()
+        mock_messaging.notify_assembler_to_start.side_effect = RuntimeError("SNS unavailable")
+        with patch.object(settings, "messaging_enabled", True), patch(
+            "app.services.aws.messaging_service.get_messaging_service",
+            return_value=mock_messaging,
+        ):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert "report_id" in data
+
+    @pytest.mark.asyncio
+    async def test_create_report_tracker_unprocessable_422(self, client, db_with_content_products):
+        """Create returns 422 when service raises UnprocessableEntityException."""
+        from unittest.mock import patch, AsyncMock
+        from app.exceptions import UnprocessableEntityException
+        from app.services.report_tracker_service import ReportTrackerService
+        report_data = {
+            "transaction_id": "TXN-12345",
+            "pr_id": "PR-12345",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        with patch.object(
+            ReportTrackerService,
+            "create",
+            new_callable=AsyncMock,
+            side_effect=UnprocessableEntityException(detail="Validation failed"),
+        ):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_get_report_tracker(self, client, db_with_content_products):
         # First create a report
         report_data = {
             "transaction_id": "TXN-67890",
@@ -388,6 +498,80 @@ class TestReportTracker:
             data = response.json()
             assert "workflow_steps_json" in data
             assert "progress_tracker" in data["workflow_steps_json"]
+
+    @pytest.mark.asyncio
+    async def test_update_report_tracker_value_error_404(self, client, sample_report_tracker):
+        """Update returns 404 when service raises ValueError."""
+        from unittest.mock import patch, AsyncMock
+        from app.services.report_tracker_service import ReportTrackerService
+        with patch.object(
+            ReportTrackerService,
+            "update",
+            new_callable=AsyncMock,
+            side_effect=ValueError("Not found"),
+        ):
+            response = await client.put(
+                f"/report-tracker/{sample_report_tracker.report_id}",
+                json={"action": "accept"},
+            )
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_update_report_tracker_unprocessable_422(self, client, sample_report_tracker):
+        """Update returns 422 when service raises UnprocessableEntityException."""
+        from unittest.mock import patch, AsyncMock
+        from app.exceptions import UnprocessableEntityException
+        from app.services.report_tracker_service import ReportTrackerService
+        with patch.object(
+            ReportTrackerService,
+            "update",
+            new_callable=AsyncMock,
+            side_effect=UnprocessableEntityException(detail="Invalid action"),
+        ):
+            response = await client.put(
+                f"/report-tracker/{sample_report_tracker.report_id}",
+                json={"action": "accept"},
+            )
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_update_report_tracker_generic_exception_400(self, client, sample_report_tracker):
+        """Update returns 400 when service raises generic Exception."""
+        from unittest.mock import patch, AsyncMock
+        from app.services.report_tracker_service import ReportTrackerService
+        with patch.object(
+            ReportTrackerService,
+            "update",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Unexpected"),
+        ):
+            response = await client.put(
+                f"/report-tracker/{sample_report_tracker.report_id}",
+                json={"action": "accept"},
+            )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_update_report_tracker_messaging_notify_raises_still_returns_200(self, client, sample_report_tracker):
+        """Update returns 200 when messaging_enabled True but notify_consumers raises (exception logged)."""
+        from unittest.mock import patch, MagicMock
+        from app.config.config import settings
+        mock_messaging = MagicMock()
+        mock_messaging.notify_consumers.side_effect = RuntimeError("SQS unavailable")
+        with patch.object(settings, "messaging_enabled", True), patch(
+            "app.services.aws.messaging_service.get_messaging_service",
+            return_value=mock_messaging,
+        ):
+            response = await client.put(
+                f"/report-tracker/{sample_report_tracker.report_id}",
+                json={"action": "accept"},
+            )
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
 
     @pytest.mark.asyncio
     async def test_get_report_status(self, client, sample_report_tracker):
@@ -442,11 +626,69 @@ class TestReportTracker:
         assert "not found" in data["detail"].lower()
 
     @pytest.mark.asyncio
-    async def test_list_report_trackers(self, client, db):
-        # First ensure we have content products
-        await _create_test_content_products(db)
-        
-        # Create a couple of reports
+    async def test_assign_user_to_step_success(self, client, sample_report_tracker):
+        """POST /report-tracker/assign-user assigns user to in-progress step."""
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "stage_name": "Authoring",
+            "step_name": "Initial Draft",
+            "user_id": "user-1",
+            "user_name": "Jane Doe",
+            "user_email": "jane@example.com",
+            "role": "Analyst",
+        }
+        response = await client.post("/report-tracker/assign-user", json=payload)
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
+        progress = data["workflow_steps_json"]["progress_tracker"]
+        current = next(s for s in progress if s["status"] == "in_progress")
+        assert "assignee" in current.get("app_data", {})
+        assert len(current["app_data"]["assignee"]) == 1
+        assert current["app_data"]["assignee"][0]["user_id"] == "user-1"
+
+    @pytest.mark.asyncio
+    async def test_assign_user_to_step_not_found(self, client, db):
+        """POST /report-tracker/assign-user returns 404 for unknown report_id."""
+        payload = {
+            "report_id": "nonexistent-report",
+            "stage_name": "Authoring",
+            "step_name": "Initial Draft",
+            "user_id": "u1",
+            "user_name": "User",
+            "user_email": "u@example.com",
+        }
+        response = await client.post("/report-tracker/assign-user", json=payload)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in response.json().get("detail", "").lower()
+
+    @pytest.mark.asyncio
+    async def test_assign_user_to_step_unprocessable_422(self, client, sample_report_tracker):
+        """POST /report-tracker/assign-user returns 422 when no matching in-progress step."""
+        from unittest.mock import patch, AsyncMock
+        from app.exceptions import UnprocessableEntityException
+        from app.services.report_tracker_service import ReportTrackerService
+        with patch.object(
+            ReportTrackerService,
+            "assign_user_to_step",
+            new_callable=AsyncMock,
+            side_effect=UnprocessableEntityException(detail="No step found with status 'in_progress'"),
+        ):
+            payload = {
+                "report_id": sample_report_tracker.report_id,
+                "stage_name": "OtherStage",
+                "step_name": "Other Step",
+                "user_id": "u1",
+                "user_name": "User",
+                "user_email": "u@example.com",
+            }
+            response = await client.post("/report-tracker/assign-user", json=payload)
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
+        assert "detail" in response.json()
+
+    @pytest.mark.asyncio
+    async def test_list_report_trackers(self, client, db_with_content_products):
+        db = db_with_content_products
         # Create a couple of reports
         reports = [
             {
@@ -707,12 +949,8 @@ class TestWorkflowActions:
         "accept", "submit", "approve",  # Forward actions
         "reject", "push_back", "pull_back"  # Backward actions
     ])
-    async def test_all_action_types(self, client, db, action):
+    async def test_all_action_types(self, client, db_with_content_products, action):
         """Test supported navigation action types work correctly."""
-        # First ensure we have content products
-        await _create_test_content_products(db)
-        
-        # Create a report
         # Create a report
         report_data = {
             "transaction_id": f"TXN-{action}",
@@ -742,10 +980,8 @@ class TestWorkflowActions:
         assert "workflow_steps_json" in data
     
     @pytest.mark.asyncio
-    async def test_forward_actions_behavior(self, client, db):
+    async def test_forward_actions_behavior(self, client, db_with_content_products):
         """Test that all forward actions (accept, submit, approve) behave the same."""
-        await _create_test_content_products(db)
-        
         forward_actions = ["accept", "submit", "approve"]
         results = []
         
@@ -781,10 +1017,8 @@ class TestWorkflowActions:
             assert "progress_tracker" in result
     
     @pytest.mark.asyncio
-    async def test_backward_actions_behavior(self, client, db):
+    async def test_backward_actions_behavior(self, client, db_with_content_products):
         """Test that all backward actions (reject, push_back, pull_back) behave the same."""
-        await _create_test_content_products(db)
-        
         backward_actions = ["reject", "push_back", "pull_back"]
         results = []
         
@@ -822,11 +1056,8 @@ class TestWorkflowActions:
             assert "progress_tracker" in result
     
     @pytest.mark.asyncio
-    async def test_invalid_action_type(self, client, db):
+    async def test_invalid_action_type(self, client, db_with_content_products):
         """Test that invalid action types are rejected."""
-        await _create_test_content_products(db)
-        
-        # Create a report
         # Create a report
         report_data = {
             "transaction_id": "TXN-invalid",
@@ -852,11 +1083,8 @@ class TestAppDataUpdate:
     """Tests for app_data update functionality."""
 
     @pytest.mark.asyncio
-    async def test_update_app_data_only_current_step(self, client, db):
+    async def test_update_app_data_only_current_step(self, client, db_with_content_products):
         """Test updating app_data without action (updates current in-progress step)."""
-        await _create_test_content_products(db)
-
-        # Create a report
         # Create a report
         report_data = {
             "transaction_id": "TXN-app-data",
@@ -893,10 +1121,8 @@ class TestAppDataUpdate:
         assert current_step["app_data"]["metadata"]["source"] == "test_app"
 
     @pytest.mark.asyncio
-    async def test_update_app_data_with_instance_id(self, client, db):
+    async def test_update_app_data_with_instance_id(self, client, db_with_content_products):
         """Test updating app_data for a specific step using instance_id."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-instance-id",
@@ -937,10 +1163,8 @@ class TestAppDataUpdate:
         assert target_step["app_data"]["review_notes"] == "Looks good"
 
     @pytest.mark.asyncio
-    async def test_update_action_and_app_data_combined(self, client, db):
+    async def test_update_action_and_app_data_combined(self, client, db_with_content_products):
         """Test updating both action and app_data in a single request."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-combined",
@@ -984,10 +1208,8 @@ class TestAppDataUpdate:
         assert first_step["app_data"]["submission_notes"] == "Ready for review"
 
     @pytest.mark.asyncio
-    async def test_update_empty_request_fails(self, client, db):
+    async def test_update_empty_request_fails(self, client, db_with_content_products):
         """Test that empty request body (no action, no app_data) returns 422."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-empty",
@@ -1010,10 +1232,8 @@ class TestAppDataUpdate:
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
     @pytest.mark.asyncio
-    async def test_update_invalid_instance_id_fails(self, client, db):
+    async def test_update_invalid_instance_id_fails(self, client, db_with_content_products):
         """Test that invalid instance_id returns 422."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-invalid",
@@ -1040,10 +1260,8 @@ class TestAppDataUpdate:
         assert "not found" in response.json()["detail"].lower()
 
     @pytest.mark.asyncio
-    async def test_update_app_data_replaces_existing(self, client, db):
+    async def test_update_app_data_replaces_existing(self, client, db_with_content_products):
         """Test that app_data update completely replaces existing app_data."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-replace",
@@ -1088,10 +1306,8 @@ class TestAppDataUpdate:
         assert "field2" not in current_step["app_data"]
 
     @pytest.mark.asyncio
-    async def test_update_app_data_flexible_structure(self, client, db):
+    async def test_update_app_data_flexible_structure(self, client, db_with_content_products):
         """Test that app_data accepts any flexible structure."""
-        await _create_test_content_products(db)
-
         # Create a report
         report_data = {
             "transaction_id": "TXN-flexible",
@@ -1150,9 +1366,9 @@ class TestActionValidation:
     """Tests for action validation against workflow JSON action_available."""
 
     @pytest.mark.asyncio
-    async def test_action_not_in_available_list(self, client, db):
+    async def test_action_not_in_available_list(self, client, db_with_content_products):
         """Test that action not in action_available list is rejected."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
 
         # Create a workflow with specific action_available list
         workflow_with_actions = {
@@ -1229,9 +1445,9 @@ class TestActionValidation:
         assert "approve" in data["detail"]
 
     @pytest.mark.asyncio
-    async def test_action_in_available_list_succeeds(self, client, db):
+    async def test_action_in_available_list_succeeds(self, client, db_with_content_products):
         """Test that action in action_available list is allowed."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
 
         # Create a workflow with specific action_available list
         workflow_with_actions = {
@@ -1302,9 +1518,9 @@ class TestActionValidation:
         assert response.status_code == status.HTTP_200_OK
 
     @pytest.mark.asyncio
-    async def test_empty_action_available_allows_all(self, client, db):
+    async def test_empty_action_available_allows_all(self, client, db_with_content_products):
         """Test that empty action_available list allows all actions (corrected behavior)."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
 
         # Create a workflow with empty action_available list
         workflow_no_actions = {
@@ -1361,9 +1577,9 @@ class TestActionValidation:
         assert response.status_code == status.HTTP_200_OK
 
     @pytest.mark.asyncio
-    async def test_validation_uses_workflow_json_not_progress_tracker(self, client, db):
+    async def test_validation_uses_workflow_json_not_progress_tracker(self, client, db_with_content_products):
         """Test that validation uses workflow_json as source of truth, not progress_tracker."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
 
         # Create a workflow with specific actions
         workflow_with_actions = {
@@ -1531,9 +1747,9 @@ class TestFinalDraftUserStory:
     """Tests for Final Draft user story: assembly -> Initial Draft, optional Copy Edit skip, validation."""
 
     @pytest.mark.asyncio
-    async def test_assembly_to_initial_draft_transition(self, client, db):
+    async def test_assembly_to_initial_draft_transition(self, client, db_with_content_products):
         """After completing Assemble Draft (accept), current step is Initial Draft."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
         workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_ASSEMBLY_TO_INITIAL)
         tracker = ReportTracker(
             report_id="PR-assembly-initial",
@@ -1574,9 +1790,9 @@ class TestFinalDraftUserStory:
         assert completed_assemble["status"] == "completed"
 
     @pytest.mark.asyncio
-    async def test_optional_copy_edit_skip(self, client, db):
+    async def test_optional_copy_edit_skip(self, client, db_with_content_products):
         """With path=skip on Final Draft, transition skips Copy Editing to Finalize Report."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
         workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_OPTIONAL_COPY_EDIT)
         tracker = ReportTracker(
             report_id="PR-optional-copy-skip",
@@ -1618,9 +1834,9 @@ class TestFinalDraftUserStory:
         assert copy_edit_step["status"] == "skipped"
 
     @pytest.mark.asyncio
-    async def test_invalid_path_returns_422(self, client, db):
+    async def test_invalid_path_returns_422(self, client, db_with_content_products):
         """Invalid path (e.g. path=nonexistent when workflow has no such key) returns 422."""
-        await _create_test_content_products(db)
+        db = db_with_content_products
         workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(WORKFLOW_OPTIONAL_COPY_EDIT)
         tracker = ReportTracker(
             report_id="PR-invalid-path",

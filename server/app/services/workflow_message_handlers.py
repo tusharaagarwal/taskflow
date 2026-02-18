@@ -202,7 +202,5 @@ workflow_handlers = WorkflowMessageHandlers()
 
 
 def register_message_handlers():
-    """No-op: assembler completion is handled by app.services.aws.listeners;
-    endpoint PR events would be wired via a separate worker if needed.
-    """
-    logger.info("Message handler registration skipped (handlers run in aws.listeners / workers)")
+    """No-op: assembler completion is handled by app.services.sqs_consumer (in-process)."""
+    logger.info("Message handler registration skipped (assembler completion in app.services.sqs_consumer)")

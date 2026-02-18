@@ -1,20 +1,7 @@
 """
 SQS Message Consumer Module
 Consumes messages from AWS SQS queue and processes them through the agent
-
-DEPRECATED: This module is deprecated. A copy is kept for reference in
-server/deprecated/sqs_consumer_deprecated.py. Assembler completion consumption
-now uses app/services/sqs_consumer.py (in-process, started in FastAPI lifespan).
-Agent service still imports this module; prefer migrating to the new consumer when possible.
 """
-import warnings
-
-warnings.warn(
-    "server.sqs_consumer is deprecated. See server/deprecated/sqs_consumer_deprecated.py "
-    "for reference; assembler completion uses app.services.sqs_consumer (in-process).",
-    DeprecationWarning,
-    stacklevel=2,
-)
 
 import json
 import os
@@ -36,10 +23,10 @@ _credentials_tip_logged = False
 def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
     """
     Load AWS configuration from JSON file
-    
+
     Args:
         config_file: Path to configuration file
-        
+
     Returns:
         Configuration dictionary
     """
@@ -47,7 +34,7 @@ def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
         # Try to load from same directory as script
         script_dir = Path(__file__).parent
         config_path = script_dir / config_file
-        
+
         if config_path.exists():
             with open(config_path, 'r') as f:
                 return json.load(f)
@@ -63,7 +50,7 @@ def load_aws_config(config_file: str = "aws_config.json") -> Dict[str, Any]:
 
 class SQSMessageConsumer:
     """Consumer for SQS messages that integrates with the Workflow Agent"""
-    
+
     def __init__(
         self,
         region: str = "ap-south-1",
@@ -74,7 +61,7 @@ class SQSMessageConsumer:
     ):
         """
         Initialize the message consumer for AWS
-        
+
         Args:
             region: AWS region (default: ap-south-1)
             aws_access_key_id: AWS access key (None to use default credentials)
@@ -85,22 +72,22 @@ class SQSMessageConsumer:
         self.region = region
         self.running = True
         self.message_handler = message_handler
-        
+
         # Prepare client configuration
         client_config = {
             'region_name': region
         }
-        
+
         # Add credentials if provided
         if aws_access_key_id and aws_secret_access_key:
             client_config['aws_access_key_id'] = aws_access_key_id
             client_config['aws_secret_access_key'] = aws_secret_access_key
             if aws_session_token:
                 client_config['aws_session_token'] = aws_session_token
-        
+
         # Initialize SQS client
         self.sqs_client = boto3.client('sqs', **client_config)
-        
+
         # Statistics
         self.stats = {
             'received': 0,
@@ -108,7 +95,7 @@ class SQSMessageConsumer:
             'failed': 0,
             'deleted': 0
         }
-        
+
         # codeql[py/log-injection]
         logger.info(f"[OK] SQS Consumer initialized for region: {sanitize_log_input(region)}")
 
@@ -126,13 +113,13 @@ class SQSMessageConsumer:
     ) -> List[Dict[str, Any]]:
         """
         Receive messages from SQS queue
-        
+
         Args:
             queue_name: Name of the SQS queue
             max_messages: Maximum number of messages to receive (1-10)
             wait_time_seconds: Long polling wait time
             visibility_timeout: Visibility timeout for received messages
-            
+
         Returns:
             List of messages
         """
@@ -155,7 +142,7 @@ class SQSMessageConsumer:
                         "3) Restart this consumer (Ctrl+C then run again)."
                     )
                 return []
-            
+
             # Receive messages
             response = self.sqs_client.receive_message(
                 QueueUrl=queue_url,
@@ -165,12 +152,12 @@ class SQSMessageConsumer:
                 AttributeNames=['All'],
                 MessageAttributeNames=['All']
             )
-            
+
             messages = response.get('Messages', [])
             self.stats['received'] += len(messages)
-            
+
             return messages
-            
+
         except Exception as e:
             # codeql[py/log-injection]
             logger.error(f"[ERROR] Error receiving messages from queue '{sanitize_log_input(queue_name)}': {sanitize_log_input(str(e))}")
@@ -179,20 +166,20 @@ class SQSMessageConsumer:
     def extract_message_content(self, message: Dict[str, Any]) -> str:
         """
         Extract the actual message content from SQS message
-        
+
         Args:
             message: Raw SQS message
-            
+
         Returns:
             Extracted message content as string
         """
         body = message.get('Body', '{}')
-        
+
         try:
             body_json = json.loads(body)
         except json.JSONDecodeError:
             return body
-        
+
         # Check if message is from SNS
         if isinstance(body_json, dict) and body_json.get('Type') == 'Notification':
             # Extract SNS message
@@ -210,26 +197,26 @@ class SQSMessageConsumer:
             if isinstance(body_json, dict):
                 return body_json.get('command') or body_json.get('message') or json.dumps(body_json)
             return body
-    
+
     def process_message(self, message: Dict[str, Any]) -> bool:
         """
         Process a single message through the agent
-        
+
         Args:
             message: Message to process
-            
+
         Returns:
             True if processing successful, False otherwise
         """
         try:
             message_id = message.get('MessageId', 'unknown')
             content = self.extract_message_content(message)
-            
+
             sanitized_content = sanitize_log_input(content)
             # codeql[py/log-injection]
             logger.info(f"📨 Processing message (ID: {sanitize_log_input(str(message_id))})")
             logger.info(f"   Content: {sanitized_content[:200]}..." if len(sanitized_content) > 200 else f"   Content: {sanitized_content}")
-            
+
             # Process through agent if handler is available
             if self.message_handler:
                 result = self.message_handler(content)
@@ -237,24 +224,24 @@ class SQSMessageConsumer:
                 logger.info(f"   Agent Response: {sanitize_log_input(json.dumps(result, default=str))[:500]}")
             else:
                 logger.warning("   No message handler configured - message logged but not processed")
-            
+
             self.stats['processed'] += 1
             return True
-            
+
         except Exception as e:
             # codeql[py/log-injection]
             logger.error(f"[ERROR] Error processing message: {sanitize_log_input(str(e))}")
             self.stats['failed'] += 1
             return False
-    
+
     def delete_message(self, queue_name: str, receipt_handle: str) -> bool:
         """
         Delete a message from the queue
-        
+
         Args:
             queue_name: Name of the SQS queue
             receipt_handle: Receipt handle of the message
-            
+
         Returns:
             True if deletion successful, False otherwise
         """
@@ -267,15 +254,15 @@ class SQSMessageConsumer:
                 # codeql[py/log-injection]
                 logger.error(f"✗ Error getting queue URL: {sanitize_log_input(str(e))}")
                 return False
-            
+
             self.sqs_client.delete_message(
                 QueueUrl=queue_url,
                 ReceiptHandle=receipt_handle
             )
-            
+
             self.stats['deleted'] += 1
             return True
-            
+
         except Exception as e:
             # codeql[py/log-injection]
             logger.error(f"[ERROR] Error deleting message: {sanitize_log_input(str(e))}")
@@ -291,7 +278,7 @@ class SQSMessageConsumer:
     ):
         """
         Continuously consume messages from queue
-        
+
         Args:
             queue_name: Name of the SQS queue
             auto_delete: Whether to automatically delete processed messages
@@ -304,7 +291,7 @@ class SQSMessageConsumer:
         logger.info(f"   Auto-delete: {auto_delete}")
         logger.info(f"   Max messages per poll: {max_messages}")
         logger.info(f"   Long polling wait time: {wait_time_seconds}s")
-        
+
         while self.running:
             try:
                 # Receive messages
@@ -313,14 +300,14 @@ class SQSMessageConsumer:
                     max_messages=max_messages,
                     wait_time_seconds=wait_time_seconds
                 )
-                
+
                 if messages:
                     logger.info(f"📥 Received {len(messages)} message(s) at {datetime.now(timezone.utc).isoformat()}")
-                    
+
                     for message in messages:
                         # Process message
                         success = self.process_message(message)
-                        
+
                         # Delete message if processing successful and auto_delete enabled
                         if success and auto_delete:
                             receipt_handle = message.get('ReceiptHandle')
@@ -333,7 +320,7 @@ class SQSMessageConsumer:
                 # Wait before next poll (only if not using long polling)
                 if wait_time_seconds == 0:
                     time.sleep(poll_interval)
-                    
+
             except KeyboardInterrupt:
                 logger.info("\n[WARN] Received interrupt signal, stopping...")
                 self.running = False
@@ -342,11 +329,11 @@ class SQSMessageConsumer:
                 # codeql[py/log-injection]
                 logger.error(f"[ERROR] Error in consumption loop: {sanitize_log_input(str(e))}")
                 time.sleep(poll_interval)
-    
+
     def get_stats(self) -> Dict[str, int]:
         """Get consumption statistics"""
         return self.stats.copy()
-    
+
     def print_stats(self):
         """Print consumption statistics"""
         logger.info("=" * 60)
@@ -365,16 +352,16 @@ def create_consumer_from_config(
 ) -> Optional[SQSMessageConsumer]:
     """
     Create an SQS consumer using configuration from file
-    
+
     Args:
         config_file: Path to AWS config file
         message_handler: Function to handle messages
-        
+
     Returns:
         Configured SQSMessageConsumer or None if config not found
     """
     config = load_aws_config(config_file)
-    
+
     if not config:
         logger.error("Failed to load AWS configuration")
         return None
@@ -448,4 +435,3 @@ if __name__ == "__main__":
     finally:
         consumer.print_stats()
     logger.info("Exited.")
-
