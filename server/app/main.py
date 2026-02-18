@@ -1,16 +1,17 @@
 # Simplified FastAPI application that works with current setup
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
-import time
-from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock
+from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock, messaging
 from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
 from app.utils.security import sanitize_log_input
+from app.config.config import settings
 
 # Pydantic models
 class WorkflowBase(BaseModel):
@@ -40,7 +41,12 @@ start_time = time.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events"""
+    """Application lifespan events.
+
+    SQS consumption (assembler completion) runs in a separate worker process
+    (worker_sqs.py); messaging_enabled is still used for publish-side guards
+    in API and services.
+    """
     logger.info("Application starting up", extra={"event": "startup"})
     yield
     logger.info("Application shutting down", extra={"event": "shutdown"})
@@ -75,6 +81,7 @@ app.include_router(health.router, prefix="/v1/health", tags=["health"])
 app.include_router(abbreviation.router, prefix="/v1")
 app.include_router(report_tracker.router, prefix="/v1")
 app.include_router(cpm_mock.router, prefix="/v1")  # TEMP MOCK: CPM API
+app.include_router(messaging.router, prefix="/v1", tags=["messaging"])
 
 # Workflow endpoints
 @app.get("/workflows", response_model=List[WorkflowResponse])
@@ -159,4 +166,4 @@ async def delete_workflow(workflow_id: int):
     return {"message": "Workflow deleted successfully"}
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.host, port=settings.port)
