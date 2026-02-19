@@ -38,18 +38,25 @@ async def create_report_tracker(
     After creating the tracker, notifies the Content Assembler to start
     creating the first draft of the report.
     """
+    import logging
+    logger = logging.getLogger(__name__)
     try:
+        logger.info("Report tracker create: starting (Step 1 create)")
         # Step 1: Create the report tracker in database
         tracker = await ReportTrackerService.create(db, create_data)
+        logger.info("Report tracker create: Step 1 done, report_id=%s", tracker.report_id)
 
         # Step 2: Notify Content Assembler to start drafting
-        import logging
         from app.services.aws.messaging_service import get_messaging_service
         from app.config.config import settings
 
-        logger = logging.getLogger(__name__)
+        logger.info(
+            "Report tracker create: messaging_enabled=%s (Step 2 notify assembler)",
+            settings.messaging_enabled,
+        )
         if settings.messaging_enabled:
             try:
+                logger.info("Report tracker create: calling get_messaging_service().notify_assembler_to_start")
                 messaging_service = get_messaging_service()
                 messaging_result = messaging_service.notify_assembler_to_start(
                     report_id=tracker.report_id,
@@ -62,16 +69,21 @@ async def create_report_tracker(
                     send_to_sqs=True
                 )
                 logger.info(
-                    "Notified Content Assembler for report_id: %s - Result: %s",
+                    "Report tracker create: Notified Content Assembler for report_id: %s - Result: %s",
                     tracker.report_id,
                     messaging_result
                 )
             except Exception as messaging_error:
                 logger.error(
-                    "Failed to notify Content Assembler for report_id: %s - Error: %s",
+                    "Report tracker create: Failed to notify Content Assembler for report_id: %s - Error: %s",
                     tracker.report_id,
-                    str(messaging_error)
+                    str(messaging_error),
+                    exc_info=True,
                 )
+        else:
+            logger.info(
+                "Report tracker create: skipping notify assembler (messaging_enabled=False)"
+            )
 
         # Step 3: Return the response
         return ReportTrackerResponse(
@@ -159,7 +171,12 @@ async def update_report_tracker(
         from app.services.aws.messaging_service import get_messaging_service
         from app.config.config import settings
 
-        logger = logging.getLogger(__name__)
+        update_logger = logging.getLogger(__name__)
+        update_logger.info(
+            "Report tracker update: report_id=%s, messaging_enabled=%s",
+            report_id,
+            settings.messaging_enabled,
+        )
         if settings.messaging_enabled:
             try:
                 additional = {}
@@ -175,17 +192,21 @@ async def update_report_tracker(
                     publish_to_sns=True,
                     send_to_sqs=True,
                 )
-                logger.info(
-                    "Notified consumers of report tracker update - report_id: %s, action: %s",
+                update_logger.info(
+                    "Report tracker update: Notified consumers - report_id: %s, action: %s",
                     tracker.report_id,
                     update_data.action,
                 )
             except Exception as notify_err:
-                logger.warning(
-                    "Failed to notify consumers for report_id %s: %s",
+                update_logger.warning(
+                    "Report tracker update: Failed to notify consumers for report_id %s: %s: %s",
                     tracker.report_id,
+                    type(notify_err).__name__,
                     str(notify_err),
+                    exc_info=True,
                 )
+        else:
+            update_logger.info("Report tracker update: skipping notify consumers (messaging_enabled=False)")
 
         # Manually construct response to debug validation error
         return ReportTrackerResponse(

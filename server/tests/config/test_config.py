@@ -1,4 +1,5 @@
 """Tests for app.config.config (validate_settings and env helpers)."""
+import importlib
 import os
 import pytest
 from unittest.mock import patch
@@ -85,3 +86,36 @@ class TestValidateSettings:
             settings, "max_file_size", 1024
         ):
             validate_settings()
+
+
+class TestOrchestratorBaseUrl:
+    """Test _orchestrator_base_url_from_server for placeholder hosts."""
+
+    def test_placeholder_host_0_0_0_0_uses_127_0_0_1(self):
+        from app.config.config import _orchestrator_base_url_from_server
+        assert _orchestrator_base_url_from_server("0.0.0.0", 8003) == "http://127.0.0.1:8003"
+
+    def test_placeholder_host_double_colon_uses_127_0_0_1(self):
+        from app.config.config import _orchestrator_base_url_from_server
+        assert _orchestrator_base_url_from_server("::", 8003) == "http://127.0.0.1:8003"
+
+    def test_normal_host_unchanged(self):
+        from app.config.config import _orchestrator_base_url_from_server
+        assert _orchestrator_base_url_from_server("localhost", 8000) == "http://localhost:8000"
+
+
+class TestSettingsAwsLoadFailure:
+    """Test Settings fallback when AWS messaging config load raises."""
+
+    def test_aws_config_load_failure_sets_messaging_enabled_false(self):
+        """When get_aws_messaging_config raises, Settings uses fallback with messaging_enabled=False."""
+        import app.config.config as config_mod
+        with patch("config_loader.config.get_aws_messaging_config", side_effect=Exception("test load failure")):
+            importlib.reload(config_mod)
+        try:
+            assert config_mod.settings.messaging_enabled is False
+            assert config_mod.settings.aws_region == "ap-south-1"
+            assert config_mod.settings.assembler_task_queue_name == "orchestrator-to-assembler"
+        finally:
+            # Restore normal config so other tests see correct settings
+            importlib.reload(config_mod)
