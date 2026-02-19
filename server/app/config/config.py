@@ -1,7 +1,10 @@
 # Configuration settings for the FastAPI application (no pydantic-settings)
+import logging
 import os
 from pathlib import Path
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 # Load .env if present (python-dotenv)
 try:
@@ -191,7 +194,18 @@ class Settings:
             # Legacy names for backward compatibility where still referenced
             self.assembler_queue_name: str = aws_config["assembler_task_queue_name"]
             self.report_update_topic_name: str = aws_config["consumer_notification_topic_name"]
-        except Exception:
+            logger.info(
+                "AWS messaging config loaded: messaging_enabled=%s, orchestrator_api_base_url=%s",
+                self.messaging_enabled,
+                self.orchestrator_api_base_url,
+            )
+        except Exception as e:
+            logger.warning(
+                "AWS messaging config load failed, using fallback (messaging_enabled=False). Error: %s: %s",
+                type(e).__name__,
+                str(e),
+                exc_info=True,
+            )
             self.messaging_enabled: bool = False
             self.aws_region: str = "ap-south-1"
             self.aws_access_key_id: Optional[str] = None

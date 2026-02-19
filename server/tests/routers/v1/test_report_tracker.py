@@ -397,6 +397,42 @@ class TestReportTracker:
         assert "workflow_steps_json" in data
 
     @pytest.mark.asyncio
+    async def test_create_report_tracker_calls_notify_assembler_to_start_when_messaging_enabled(self, client, db_with_content_products):
+        """Create report triggers notify_assembler_to_start (orchestrator -> assembler publish) when messaging_enabled is True."""
+        from unittest.mock import patch, MagicMock
+        from app.config.config import settings
+        report_data = {
+            "transaction_id": "TXN-PUB",
+            "pr_id": "PR-PUB",
+            "content_type": "Credit Opinion",
+            "lob": DEFAULT_LOB,
+            "sub_lob": DEFAULT_SUB_LOB,
+            "document_type": "Credit Opinion",
+            "action_code": "APPROVED",
+        }
+        mock_messaging = MagicMock()
+        mock_messaging.notify_assembler_to_start.return_value = {"sns_response": {}, "sqs_response": {}}
+        with patch.object(settings, "messaging_enabled", True), patch(
+            "app.services.aws.messaging_service.get_messaging_service",
+            return_value=mock_messaging,
+        ):
+            response = await client.post("/report-tracker/", json=report_data)
+        assert response.status_code == status.HTTP_201_CREATED
+        data = response.json()
+        assert "report_id" in data
+        assert mock_messaging.notify_assembler_to_start.call_count == 1, (
+            "notify_assembler_to_start should be called once when messaging_enabled is True"
+        )
+        call_kwargs = mock_messaging.notify_assembler_to_start.call_args[1]
+        assert call_kwargs["report_id"] == data["report_id"]
+        assert call_kwargs["pr_id"] == report_data["pr_id"]
+        assert call_kwargs["transaction_id"] == report_data["transaction_id"]
+        assert call_kwargs["action_code"] == report_data["action_code"]
+        assert call_kwargs["publish_to_sns"] is True
+        assert call_kwargs["send_to_sqs"] is True
+        assert str(data["id"]) == call_kwargs["workflow_id"]
+
+    @pytest.mark.asyncio
     async def test_create_report_tracker_messaging_notify_raises_still_returns_201(self, client, db_with_content_products):
         """Create returns 201 when messaging_enabled True but notify_assembler_to_start raises (exception logged)."""
         from unittest.mock import patch, MagicMock

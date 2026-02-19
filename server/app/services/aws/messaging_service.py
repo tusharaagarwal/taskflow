@@ -114,8 +114,13 @@ class MessagingService:
         Raises:
             MessagingServiceError: If messaging is disabled or both targets are skipped
         """
+        logger.info(
+            "notify_assembler_to_start: called, messaging_enabled=%s, report_id=%s",
+            settings.messaging_enabled,
+            report_id,
+        )
         if not settings.messaging_enabled:
-            logger.warning("Messaging is disabled, skipping notify_assembler_to_start")
+            logger.warning("notify_assembler_to_start: messaging_enabled=False, skipping (no SNS/SQS)")
             return {"status": "skipped", "reason": "messaging_disabled"}
 
         if not publish_to_sns and not send_to_sqs:
@@ -152,6 +157,7 @@ class MessagingService:
         result: Dict[str, Any] = {}
 
         # Publish to SNS
+        logger.info("notify_assembler_to_start: publishing to SNS (publish_to_sns=%s), SQS (send_to_sqs=%s)", publish_to_sns, send_to_sqs)
         if publish_to_sns:
             try:
                 sns_response = self.publisher.publish_to_sns(
@@ -168,7 +174,7 @@ class MessagingService:
                     sns_response.get("MessageId", "unknown")
                 )
             except Exception as e:
-                logger.error("Failed to publish to SNS: %s", str(e))
+                logger.error("notify_assembler_to_start: Failed to publish to SNS: %s: %s", type(e).__name__, str(e), exc_info=True)
                 result["sns_error"] = str(e)
 
         # Send to SQS
@@ -188,9 +194,10 @@ class MessagingService:
                     sqs_response.get("MessageId", "unknown")
                 )
             except Exception as e:
-                logger.error("Failed to send to SQS: %s", str(e))
+                logger.error("notify_assembler_to_start: Failed to send to SQS: %s: %s", type(e).__name__, str(e), exc_info=True)
                 result["sqs_error"] = str(e)
 
+        logger.info("notify_assembler_to_start: done, result keys=%s", list(result.keys()))
         return result
 
     # ================================================================
@@ -285,8 +292,14 @@ class MessagingService:
         Returns:
             Dictionary with response information.
         """
+        logger.info(
+            "notify_consumers: called, messaging_enabled=%s, report_id=%s, event_type=%s",
+            settings.messaging_enabled,
+            report_id,
+            event_type,
+        )
         if not settings.messaging_enabled:
-            logger.warning("Messaging is disabled, skipping notify_consumers")
+            logger.warning("notify_consumers: messaging_enabled=False, skipping")
             return {"status": "skipped", "reason": "messaging_disabled"}
 
         timestamp = datetime.now(timezone.utc).isoformat()
