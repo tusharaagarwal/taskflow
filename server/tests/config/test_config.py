@@ -1,8 +1,30 @@
-"""Tests for app.config.config (validate_settings)."""
+"""Tests for app.config.config (validate_settings and env helpers)."""
+import os
 import pytest
 from unittest.mock import patch
 
 from app.config.config import validate_settings, settings
+
+
+class TestConfigEnvHelpers:
+    """Test _env_bool, _env_int, _env_list to cover config module branches."""
+
+    def test_env_bool_returns_true_for_truthy_values(self):
+        from app.config.config import _env_bool
+        with patch.dict(os.environ, {"TEST_ENV_BOOL": "true"}, clear=False):
+            assert _env_bool("TEST_ENV_BOOL", False) is True
+        with patch.dict(os.environ, {"TEST_ENV_BOOL": "1"}, clear=False):
+            assert _env_bool("TEST_ENV_BOOL", False) is True
+
+    def test_env_int_returns_default_on_invalid_value(self):
+        from app.config.config import _env_int
+        with patch.dict(os.environ, {"TEST_ENV_INT": "not_a_number"}, clear=False):
+            assert _env_int("TEST_ENV_INT", 42) == 42
+
+    def test_env_list_returns_split_list_when_non_empty(self):
+        from app.config.config import _env_list
+        with patch.dict(os.environ, {"TEST_ENV_LIST": "a, b , c"}, clear=False):
+            assert _env_list("TEST_ENV_LIST", None) == ["a", "b", "c"]
 
 
 class TestValidateSettings:
