@@ -275,7 +275,8 @@ class MessagePublisher:
         message_attributes: Optional[Dict[str, Any]] = None,
         delay_seconds: int = 0,
         message_group_id: Optional[str] = None,
-        message_deduplication_id: Optional[str] = None
+        message_deduplication_id: Optional[str] = None,
+        queue_url: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Send a JSON message to SQS queue.
@@ -293,7 +294,7 @@ class MessagePublisher:
         }
 
         Args:
-            queue_name: Name of the SQS queue
+            queue_name: Name of the SQS queue (used for FIFO detection and logging; required)
             message: JSON message dictionary to send. Should contain:
                      - For task processing: {"pr_id": str, "content": str, "priority": str}
                      - For report updates: {"report_id": str, "workflow_id": str, "status": str}
@@ -301,6 +302,7 @@ class MessagePublisher:
             delay_seconds: Delay before message becomes visible (0-900 seconds)
             message_group_id: Required for FIFO queues (defaults to 'default-group')
             message_deduplication_id: Optional for FIFO queues (auto-generated if not provided)
+            queue_url: Optional full SQS queue URL; if set, used directly instead of resolving from queue_name
 
         Returns:
             AWS SQS send_message response containing:
@@ -312,9 +314,12 @@ class MessagePublisher:
             SQSPublishError: If sending fails
         """
         try:
-            # Get queue URL from queue name
-            url_response = self.sqs_client.get_queue_url(QueueName=queue_name)
-            queue_url = url_response['QueueUrl']
+            # Use queue_url if provided, else resolve from queue name
+            if queue_url is not None and queue_url.strip():
+                queue_url = queue_url.strip()
+            else:
+                url_response = self.sqs_client.get_queue_url(QueueName=queue_name)
+                queue_url = url_response['QueueUrl']
 
             # Serialize message to JSON
             message_json = json.dumps(message, indent=2)

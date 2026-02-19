@@ -202,6 +202,7 @@ class AssemblerCompletionSQSConsumer:
             raise ValueError("Messaging is disabled")
 
         region = getattr(settings, "aws_region", "ap-south-1")
+        queue_url_cfg = (getattr(settings, "assembler_completion_queue_url", None) or "").strip()
         queue_name = getattr(settings, "assembler_completion_queue_name", "assembler-to-orchestrator")
 
         client_kwargs: Dict[str, Any] = {"service_name": "sqs", "region_name": region}
@@ -212,8 +213,11 @@ class AssemblerCompletionSQSConsumer:
                 client_kwargs["aws_session_token"] = settings.aws_session_token
 
         self.sqs_client = boto3.client(**client_kwargs)
-        response = self.sqs_client.get_queue_url(QueueName=queue_name)
-        self.queue_url = response["QueueUrl"]
+        if queue_url_cfg:
+            self.queue_url = queue_url_cfg
+        else:
+            response = self.sqs_client.get_queue_url(QueueName=queue_name)
+            self.queue_url = response["QueueUrl"]
         logger.info("SQS client initialized for queue: %s", self.queue_url)
 
     def _receive_messages_sync(self) -> Dict[str, Any]:

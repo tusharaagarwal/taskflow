@@ -178,7 +178,8 @@ class MessagingService:
                     queue_name=settings.assembler_task_queue_name,
                     message=message,
                     message_group_id=settings.assembler_message_group_id,
-                    message_deduplication_id=f"{dedup_id}-sqs"
+                    message_deduplication_id=f"{dedup_id}-sqs",
+                    queue_url=(settings.assembler_task_queue_url or None)
                 )
                 result["sqs_response"] = sqs_response
                 logger.info(
@@ -336,7 +337,8 @@ class MessagingService:
                     queue_name=settings.consumer_notification_queue_name,
                     message=message,
                     message_group_id=settings.consumer_notification_message_group_id,
-                    message_deduplication_id=f"{dedup_id}-sqs"
+                    message_deduplication_id=f"{dedup_id}-sqs",
+                    queue_url=(settings.consumer_notification_queue_url or None)
                 )
                 result["sqs_response"] = sqs_response
                 logger.info(
