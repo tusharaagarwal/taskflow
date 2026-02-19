@@ -172,8 +172,11 @@ class Settings:
             self.assembler_task_topic_name: str = aws_config["assembler_task_topic_name"]
             self.assembler_message_group_id: str = aws_config["assembler_message_group_id"]
             self.assembler_completion_queue_name: str = aws_config["assembler_completion_queue_name"]
+            self.assembler_task_queue_url: str = (aws_config.get("assembler_task_queue_url") or "").strip()
+            self.assembler_completion_queue_url: str = (aws_config.get("assembler_completion_queue_url") or "").strip()
             self.consumer_notification_topic_name: str = aws_config["consumer_notification_topic_name"]
             self.consumer_notification_queue_name: str = aws_config["consumer_notification_queue_name"]
+            self.consumer_notification_queue_url: str = (aws_config.get("consumer_notification_queue_url") or "").strip()
             self.consumer_notification_message_group_id: str = aws_config["consumer_notification_message_group_id"]
             self.sqs_max_messages: int = aws_config["sqs_max_messages"]
             self.sqs_wait_time_seconds: int = aws_config["sqs_wait_time_seconds"]
@@ -198,8 +201,11 @@ class Settings:
             self.assembler_task_topic_name: str = "orchestrator-to-assembler"
             self.assembler_message_group_id: str = "orchestrator-to-assembler-group-1"
             self.assembler_completion_queue_name: str = "assembler-to-orchestrator"
+            self.assembler_task_queue_url: str = ""
+            self.assembler_completion_queue_url: str = ""
             self.consumer_notification_topic_name: str = "orchestrator-to-authoring"
             self.consumer_notification_queue_name: str = "orchestrator-to-authoring"
+            self.consumer_notification_queue_url: str = ""
             self.consumer_notification_message_group_id: str = "consumer-notification-group-1"
             self.sqs_max_messages: int = 10
             self.sqs_wait_time_seconds: int = 20

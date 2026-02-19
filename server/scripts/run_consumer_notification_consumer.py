@@ -88,6 +88,7 @@ async def _run_consumer() -> None:
         return
 
     queue_name = getattr(settings, "consumer_notification_queue_name", "orchestrator-to-authoring")
+    queue_url_cfg = (getattr(settings, "consumer_notification_queue_url", None) or "").strip()
     region = getattr(settings, "aws_region", "ap-south-1")
 
     client_kwargs: Dict[str, Any] = {"service_name": "sqs", "region_name": region}
@@ -98,8 +99,11 @@ async def _run_consumer() -> None:
             client_kwargs["aws_session_token"] = settings.aws_session_token
 
     sqs = boto3.client(**client_kwargs)
-    resp = sqs.get_queue_url(QueueName=queue_name)
-    queue_url = resp["QueueUrl"]
+    if queue_url_cfg:
+        queue_url = queue_url_cfg
+    else:
+        resp = sqs.get_queue_url(QueueName=queue_name)
+        queue_url = resp["QueueUrl"]
 
     executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="consumer-notif")
 

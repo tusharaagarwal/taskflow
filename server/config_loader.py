@@ -196,9 +196,12 @@ class ConfigManager:
             "assembler_task_topic_name": self._get_config_value("ASSEMBLER_TASK_TOPIC_NAME", "orchestrator-to-assembler"),
             "assembler_message_group_id": self._get_config_value("ASSEMBLER_MESSAGE_GROUP_ID", "CreditOpinionAssembler-group-1"),
             "assembler_completion_queue_name": self._get_config_value("ASSEMBLER_COMPLETION_QUEUE_NAME", "assembler-to-orchestrator"),
+            "assembler_task_queue_url": self._get_config_value("ASSEMBLER_TASK_QUEUE_URL", ""),
+            "assembler_completion_queue_url": self._get_config_value("ASSEMBLER_COMPLETION_QUEUE_URL", ""),
             # SNS topic and queue for consumer apps (e.g. authoring); must not be assembler-to-orchestrator to avoid feedback loop
             "consumer_notification_topic_name": self._get_config_value("CONSUMER_NOTIFICATION_TOPIC_NAME", "orchestrator-to-authoring"),
             "consumer_notification_queue_name": self._get_config_value("CONSUMER_NOTIFICATION_QUEUE_NAME", "orchestrator-to-authoring"),
+            "consumer_notification_queue_url": self._get_config_value("CONSUMER_NOTIFICATION_QUEUE_URL", ""),
             "consumer_notification_message_group_id": self._get_config_value("CONSUMER_NOTIFICATION_MESSAGE_GROUP_ID", "consumer-notification-group-1"),
             "sqs_max_messages": int(self._get_config_value("SQS_MAX_MESSAGES", 10)),
             "sqs_wait_time_seconds": int(self._get_config_value("SQS_WAIT_TIME_SECONDS", 20)),
