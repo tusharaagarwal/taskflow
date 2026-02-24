@@ -100,6 +100,45 @@ SAMPLE_WORKFLOW = {
 
 SAMPLE_WORKFLOW_JSON = json.dumps(SAMPLE_WORKFLOW)
 
+# Workflow with first step = agent (assembler), second = human (for exclude-assembler tests)
+SAMPLE_WORKFLOW_WITH_ASSEMBLER = {
+    "steps": [
+        {
+            "step_id": "initial_draft_001",
+            "step_name": "Assemble Draft",
+            "stage_name": "Authoring",
+            "actor": {"id": "co_assembler", "pool": False, "role": "NA", "type": "agent"},
+            "is_optional": False,
+            "sla": {},
+            "action_available": [],
+            "personas": [],
+            "transitions": {"success_goto": "initial_draft_002", "fail_goto": "NA"}
+        },
+        {
+            "step_id": "initial_draft_002",
+            "step_name": "Initial Draft",
+            "stage_name": "Authoring",
+            "actor": {"pool": True, "role": "gcc_associate", "type": "human"},
+            "is_optional": False,
+            "sla": {},
+            "action_available": ["accept", "submit", "approve"],
+            "personas": [],
+            "transitions": {"success_goto": "final_draft", "fail_goto": "NA"}
+        },
+        {
+            "step_id": "final_draft",
+            "step_name": "Final Draft",
+            "stage_name": "Authoring",
+            "actor": {"pool": False, "role": "research_associate", "type": "human"},
+            "is_optional": False,
+            "sla": {},
+            "action_available": [],
+            "personas": [],
+            "transitions": {"success_goto": "NA", "fail_goto": "NA"}
+        }
+    ]
+}
+
 # Mock for ContentProduct.get_workflow_json
 async def mock_get_workflow_json(self, db):
     # Return a sample workflow based on the workflow_id
@@ -844,6 +883,127 @@ class TestReportTracker:
         data = response.json()
         assert "detail" in data
         assert "not found" in data["detail"].lower()
+
+
+class TestExcludeAssembler:
+    """Tests for GET /report-tracker/{report_id}/status/exclude-assembler."""
+
+    @pytest.mark.asyncio
+    async def test_get_status_exclude_first_assembler_step_success(self, client, db, mock_cpm_and_workflow):
+        """Exclude-assembler endpoint returns progress_tracker starting from first human step."""
+        await _create_test_content_products(db)
+        with patch.object(WorkflowService, "get_workflow_json_from_workflow", new_callable=AsyncMock) as mock_wf:
+            mock_wf.return_value = SAMPLE_WORKFLOW_WITH_ASSEMBLER
+            create_response = await client.post(
+                "/report-tracker/",
+                json={
+                    "report_id": "PR-exclude-assembler",
+                    "content_product_name": "Credit Opinion",
+                    "lob": DEFAULT_LOB,
+                    "sub_lob": DEFAULT_SUB_LOB
+                }
+            )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        response = await client.get(f"/report-tracker/{report_id}/status/exclude-assembler")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == report_id
+        assert "progress_tracker" in data
+        pt = data["progress_tracker"]
+        assert len(pt) >= 1
+        first = pt[0]
+        assert first.get("actor", {}).get("type") == "human"
+        assert first.get("step_name") == "Initial Draft"
+        step_ids = [s.get("step_id") for s in pt]
+        assert "initial_draft_001" not in step_ids
+
+    @pytest.mark.asyncio
+    async def test_get_status_exclude_first_assembler_step_not_found(self, client, db):
+        """Exclude-assembler endpoint returns 404 for non-existent report_id."""
+        response = await client.get("/report-tracker/nonexistent-report-id/status/exclude-assembler")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        data = response.json()
+        assert "detail" in data
+        assert "not found" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_get_status_exclude_first_assembler_step_no_human_steps(self, client, db):
+        """Exclude-assembler returns 200 with empty progress_tracker when all steps are agent."""
+        await _create_test_content_products(db)
+        steps_only_agent = [
+            {
+                "instance_id": "inst-1",
+                "step_id": "agent_only",
+                "step_name": "Agent Step",
+                "stage_name": "Auto",
+                "actor": {"type": "agent"},
+                "status": "in_progress",
+                "app_data": {"assignee": []},
+            }
+        ]
+        tracker = ReportTracker(
+            report_id="PR-no-human",
+            workflow_json={},
+            workflow_steps_json={"progress_tracker": steps_only_agent},
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        response = await client.get(f"/report-tracker/{tracker.report_id}/status/exclude-assembler")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == tracker.report_id
+        assert data["progress_tracker"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_status_exclude_first_assembler_step_empty_progress_tracker(self, client, db):
+        """Exclude-assembler returns 200 with empty progress_tracker when progress_tracker is empty."""
+        await _create_test_content_products(db)
+        tracker = ReportTracker(
+            report_id="PR-empty-pt",
+            workflow_json={},
+            workflow_steps_json={"progress_tracker": []},
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(tracker)
+        await db.commit()
+        await db.refresh(tracker)
+        response = await client.get(f"/report-tracker/{tracker.report_id}/status/exclude-assembler")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == tracker.report_id
+        assert data["progress_tracker"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_status_unchanged(self, client, db, mock_cpm_and_workflow):
+        """Existing GET /status returns full progress_tracker including assembler (regression)."""
+        await _create_test_content_products(db)
+        with patch.object(WorkflowService, "get_workflow_json_from_workflow", new_callable=AsyncMock) as mock_wf:
+            mock_wf.return_value = SAMPLE_WORKFLOW_WITH_ASSEMBLER
+            create_response = await client.post(
+                "/report-tracker/",
+                json={
+                    "report_id": "PR-status-unchanged",
+                    "content_product_name": "Credit Opinion",
+                    "lob": DEFAULT_LOB,
+                    "sub_lob": DEFAULT_SUB_LOB
+                }
+            )
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        response = await client.get(f"/report-tracker/{report_id}/status")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "progress_tracker" in data
+        pt = data["progress_tracker"]
+        assert len(pt) >= 1
+        first = pt[0]
+        assert first.get("actor", {}).get("type") == "agent"
+        assert first.get("step_name") == "Assemble Draft"
 
 
 class TestPathResolution:

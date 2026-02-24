@@ -1,40 +1,15 @@
 # Simplified FastAPI application that works with current setup
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
 import uvicorn
-from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock, messaging
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock, messaging, workflow
 from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
-from app.utils.security import sanitize_log_input
 from app.config.config import settings
 from app.services.sqs_consumer import sqs_consumer
-
-# Pydantic models
-class WorkflowBase(BaseModel):
-    name: str
-    description: Optional[str] = None
-
-class WorkflowCreate(WorkflowBase):
-    pass
-
-class WorkflowUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-
-class WorkflowResponse(WorkflowBase):
-    id: int
-    status: str
-    created_at: str
-
-# In-memory storage
-workflows_db = []
-workflow_counter = 1
 
 # Track application uptime
 start_time = time.time()
@@ -98,88 +73,7 @@ app.include_router(abbreviation.router, prefix="/v1")
 app.include_router(report_tracker.router, prefix="/v1")
 app.include_router(cpm_mock.router, prefix="/v1")  # TEMP MOCK: CPM API
 app.include_router(messaging.router, prefix="/v1", tags=["messaging"])
-
-# Workflow endpoints
-@app.get("/workflows", response_model=List[WorkflowResponse])
-async def get_workflows():
-    """Get all workflows"""
-    logger.info(f"Fetching all workflows - Count: {len(workflows_db)}")
-    return workflows_db
-
-@app.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
-async def get_workflow(workflow_id: int):
-    """Get a specific workflow by ID"""
-    # codeql[py/log-injection]
-    logger.info(f"Fetching workflow with ID: {sanitize_log_input(str(workflow_id))}")
-    workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
-    if not workflow:
-        # codeql[py/log-injection]
-        logger.warning(f"Workflow not found - ID: {sanitize_log_input(str(workflow_id))}")
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    return workflow
-
-@app.post("/workflows", response_model=WorkflowResponse)
-async def create_workflow(workflow: WorkflowCreate):
-    """Create a new workflow"""
-    global workflow_counter
-    # codeql[py/log-injection]
-    logger.info(f"Creating new workflow - Name: {sanitize_log_input(workflow.name)}")
-    new_workflow = {
-        "id": workflow_counter,
-        "name": workflow.name,
-        "description": workflow.description,
-        "status": "pending",
-        "created_at": "2024-01-01T00:00:00Z"
-    }
-    workflows_db.append(new_workflow)
-    # codeql[py/log-injection]
-    logger.info(f"Workflow created successfully - ID: {workflow_counter}, Name: {sanitize_log_input(workflow.name)}")
-    workflow_counter += 1
-    return new_workflow
-
-@app.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
-async def update_workflow(workflow_id: int, workflow_update: WorkflowUpdate):
-    """Update an existing workflow"""
-    # codeql[py/log-injection]
-    logger.info(f"Updating workflow - ID: {sanitize_log_input(str(workflow_id))}")
-    workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
-    if not workflow:
-        # codeql[py/log-injection]
-        logger.warning(f"Workflow not found for update - ID: {sanitize_log_input(str(workflow_id))}")
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    
-    # Update fields if provided
-    updated_fields = []
-    if workflow_update.name is not None:
-        workflow["name"] = workflow_update.name
-        updated_fields.append("name")
-    if workflow_update.description is not None:
-        workflow["description"] = workflow_update.description
-        updated_fields.append("description")
-    if workflow_update.status is not None:
-        workflow["status"] = workflow_update.status
-        updated_fields.append("status")
-    
-    # codeql[py/log-injection]
-    logger.info(f"Workflow updated successfully - ID: {sanitize_log_input(str(workflow_id))}, Updated fields: {sanitize_log_input(', '.join(updated_fields))}")
-    return workflow
-
-@app.delete("/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: int):
-    """Delete a workflow"""
-    global workflows_db
-    # codeql[py/log-injection]
-    logger.info(f"Deleting workflow - ID: {sanitize_log_input(str(workflow_id))}")
-    workflow = next((w for w in workflows_db if w["id"] == workflow_id), None)
-    if not workflow:
-        # codeql[py/log-injection]
-        logger.warning(f"Workflow not found for deletion - ID: {sanitize_log_input(str(workflow_id))}")
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    
-    workflows_db = [w for w in workflows_db if w["id"] != workflow_id]
-    # codeql[py/log-injection]
-    logger.info(f"Workflow deleted successfully - ID: {sanitize_log_input(str(workflow_id))}")
-    return {"message": "Workflow deleted successfully"}
+app.include_router(workflow.router, prefix="/api/v1")
 
 if __name__ == "__main__":
     uvicorn.run(app, host=settings.host, port=settings.port)

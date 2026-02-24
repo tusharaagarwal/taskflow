@@ -240,6 +240,24 @@ async def update_report_tracker(
         )
 
 
+@router.get("/{report_id}/status/exclude-assembler", response_model=ReportTrackerStatusResponse)
+async def get_status_exclude_first_assembler_step(
+    report_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get report status by report_id with progress_tracker starting from the first human step,
+    excluding the leading agent assembler step. Same response shape as GET /{report_id}/status.
+    """
+    status_data = await ReportTrackerService.get_status_exclude_first_assembler_step(db, report_id)
+    if not status_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report tracker with report_id '{report_id}' not found"
+        )
+    return status_data
+
+
 @router.get("/{report_id}/status", response_model=ReportTrackerStatusResponse)
 async def get_report_status(
     report_id: str,
