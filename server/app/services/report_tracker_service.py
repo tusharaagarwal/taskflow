@@ -1097,6 +1097,34 @@ class ReportTrackerService:
         }
 
     @staticmethod
+    def _get_progress_tracker_exclude_first_assembler_step(progress_tracker: List[Any]) -> List[Any]:
+        """
+        Return the sublist of progress_tracker starting from the first step whose actor.type == "human".
+        If no human step exists, return [].
+        """
+        for i, step in enumerate(progress_tracker):
+            actor = step.get("actor") if isinstance(step, dict) else {}
+            if isinstance(actor, dict) and actor.get("type") == "human":
+                return progress_tracker[i:]
+        return []
+
+    @staticmethod
+    async def get_status_exclude_first_assembler_step(db: AsyncSession, report_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get workflow status for a report with progress_tracker starting from the first human step
+        (excluding the leading agent assembler step). Same shape as get_status.
+        Returns None if tracker not found.
+        """
+        status_data = await ReportTrackerService.get_status(db, report_id)
+        if not status_data:
+            return None
+        progress_tracker = status_data.get("progress_tracker", [])
+        status_data["progress_tracker"] = ReportTrackerService._get_progress_tracker_exclude_first_assembler_step(
+            progress_tracker
+        )
+        return status_data
+
+    @staticmethod
     async def assign_user_to_step(
         db: AsyncSession,
         report_id: str,

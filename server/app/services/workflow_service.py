@@ -1,8 +1,29 @@
 # services/workflow_service.py
-from typing import Optional, Dict, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
 import json
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.workflow import Workflow
+from app.schemas.workflow_schemas import WorkflowCreateRequest, WorkflowUpdateRequest
+
+
+def _parse_workflow_json(raw: Any) -> Dict[str, Any]:
+    """Parse workflow_json column (str or dict) to dict. Returns {} on failure."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
 
 class WorkflowService:
     @staticmethod
@@ -149,3 +170,104 @@ class WorkflowService:
             # Log the error (you might want to add proper logging)
             print(f"Error fetching workflow {workflow_id}: {str(e)}")
             raise
+
+    @staticmethod
+    def parse_workflow_json_raw(raw: Any) -> Dict[str, Any]:
+        """Parse workflow_json column value to dict for API responses."""
+        return _parse_workflow_json(raw)
+
+    @staticmethod
+    async def get_workflows(
+        db: AsyncSession,
+        is_active: Optional[bool] = None,
+    ) -> List[Workflow]:
+        """Return non-soft-deleted workflows, optionally filtered by is_active."""
+        stmt = select(Workflow).where(Workflow.deleted_at.is_(None))
+        if is_active is not None:
+            stmt = stmt.where(Workflow.is_active == is_active)
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_workflow_count(
+        db: AsyncSession,
+        is_active: Optional[bool] = None,
+    ) -> int:
+        """Return count of non-soft-deleted workflows, optionally filtered by is_active."""
+        stmt = select(func.count()).select_from(Workflow).where(Workflow.deleted_at.is_(None))
+        if is_active is not None:
+            stmt = stmt.where(Workflow.is_active == is_active)
+        result = await db.execute(stmt)
+        return result.scalar() or 0
+
+    @staticmethod
+    async def get_workflow_by_id(
+        db: AsyncSession,
+        workflow_id: int,
+    ) -> Optional[Workflow]:
+        """Fetch single workflow by ID; returns None if not found or soft-deleted."""
+        stmt = (
+            select(Workflow)
+            .where(Workflow.workflow_id == workflow_id)
+            .where(Workflow.deleted_at.is_(None))
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def resolve_workflow_name(workflow: Workflow) -> Optional[str]:
+        """Resolve display name: column name, else workflow_json workflow_name/name, else None."""
+        if workflow.name is not None and workflow.name != "":
+            return workflow.name
+        data = _parse_workflow_json(workflow.workflow_json)
+        return data.get("workflow_name") or data.get("name") or None
+
+    @staticmethod
+    async def create_workflow(
+        db: AsyncSession,
+        data: WorkflowCreateRequest,
+    ) -> Workflow:
+        """Create a new workflow. Returns the created workflow with workflow_id set."""
+        workflow = Workflow(
+            workflow_json=json.dumps(data.workflow_json),
+            name=data.name,
+            is_active=data.is_active,
+        )
+        db.add(workflow)
+        await db.commit()
+        await db.refresh(workflow)
+        return workflow
+
+    @staticmethod
+    async def update_workflow(
+        db: AsyncSession,
+        workflow_id: int,
+        data: WorkflowUpdateRequest,
+    ) -> Optional[Workflow]:
+        """Update only provided fields; returns None if workflow not found or soft-deleted."""
+        workflow = await WorkflowService.get_workflow_by_id(db, workflow_id)
+        if workflow is None:
+            return None
+        if data.name is not None:
+            workflow.name = data.name
+        if data.is_active is not None:
+            workflow.is_active = data.is_active
+        if data.workflow_json is not None:
+            workflow.workflow_json = json.dumps(data.workflow_json)
+        await db.commit()
+        await db.refresh(workflow)
+        return workflow
+
+    @staticmethod
+    async def soft_delete_workflow(
+        db: AsyncSession,
+        workflow_id: int,
+    ) -> Optional[Workflow]:
+        """Set deleted_at to current UTC time; returns None if not found or already deleted."""
+        workflow = await WorkflowService.get_workflow_by_id(db, workflow_id)
+        if workflow is None:
+            return None
+        workflow.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(workflow)
+        return workflow
