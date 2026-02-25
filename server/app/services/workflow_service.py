@@ -7,7 +7,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.workflow import Workflow
-from app.schemas.workflow_schemas import WorkflowUpdateRequest
+from app.schemas.workflow_schemas import WorkflowCreateRequest, WorkflowUpdateRequest
 
 
 def _parse_workflow_json(raw: Any) -> Dict[str, Any]:
@@ -221,6 +221,22 @@ class WorkflowService:
             return workflow.name
         data = _parse_workflow_json(workflow.workflow_json)
         return data.get("workflow_name") or data.get("name") or None
+
+    @staticmethod
+    async def create_workflow(
+        db: AsyncSession,
+        data: WorkflowCreateRequest,
+    ) -> Workflow:
+        """Create a new workflow. Returns the created workflow with workflow_id set."""
+        workflow = Workflow(
+            workflow_json=json.dumps(data.workflow_json),
+            name=data.name,
+            is_active=data.is_active,
+        )
+        db.add(workflow)
+        await db.commit()
+        await db.refresh(workflow)
+        return workflow
 
     @staticmethod
     async def update_workflow(

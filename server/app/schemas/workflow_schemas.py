@@ -32,6 +32,12 @@ class WorkflowDetail(BaseModel):
         from_attributes = True
 
 
+class WorkflowCreateRequest(BaseModel):
+    workflow_json: Dict[str, Any]
+    name: Optional[str] = None
+    is_active: bool = True
+
+
 class WorkflowUpdateRequest(BaseModel):
     name: Optional[str] = None
     is_active: Optional[bool] = None

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.schemas.workflow_schemas import (
+    WorkflowCreateRequest,
     WorkflowDetail,
     WorkflowListItem,
     WorkflowListResponse,
@@ -13,6 +14,28 @@ from app.schemas.workflow_schemas import (
 from app.services.workflow_service import WorkflowService
 
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
+
+
+def _workflow_to_detail(workflow) -> WorkflowDetail:
+    workflow_json = WorkflowService.parse_workflow_json_raw(workflow.workflow_json)
+    return WorkflowDetail(
+        workflow_id=workflow.workflow_id,
+        name=WorkflowService.resolve_workflow_name(workflow),
+        is_active=workflow.is_active,
+        workflow_json=workflow_json,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+    )
+
+
+@router.post("/", response_model=WorkflowDetail, status_code=status.HTTP_201_CREATED)
+async def create_workflow(
+    body: WorkflowCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new workflow. Body must include workflow_json; name and is_active are optional."""
+    workflow = await WorkflowService.create_workflow(db, body)
+    return _workflow_to_detail(workflow)
 
 
 @router.get("/", response_model=WorkflowListResponse)
@@ -48,15 +71,7 @@ async def get_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workflow with workflow_id '{workflow_id}' not found",
         )
-    workflow_json = WorkflowService.parse_workflow_json_raw(workflow.workflow_json)
-    return WorkflowDetail(
-        workflow_id=workflow.workflow_id,
-        name=WorkflowService.resolve_workflow_name(workflow),
-        is_active=workflow.is_active,
-        workflow_json=workflow_json,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-    )
+    return _workflow_to_detail(workflow)
 
 
 @router.patch("/{workflow_id}", response_model=WorkflowDetail)
@@ -72,15 +87,7 @@ async def update_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workflow with workflow_id '{workflow_id}' not found",
         )
-    workflow_json = WorkflowService.parse_workflow_json_raw(workflow.workflow_json)
-    return WorkflowDetail(
-        workflow_id=workflow.workflow_id,
-        name=WorkflowService.resolve_workflow_name(workflow),
-        is_active=workflow.is_active,
-        workflow_json=workflow_json,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-    )
+    return _workflow_to_detail(workflow)
 
 
 @router.delete("/{workflow_id}", status_code=status.HTTP_204_NO_CONTENT)
