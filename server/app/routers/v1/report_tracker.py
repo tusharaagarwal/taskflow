@@ -66,7 +66,7 @@ async def create_report_tracker(
                     transaction_id=tracker.transaction_id,
                     action_code=tracker.action_code,
                     publish_to_sns=True,
-                    send_to_sqs=True
+                    send_to_sqs=False
                 )
                 logger.info(
                     "Report tracker create: Notified Content Assembler for report_id: %s - Result: %s",

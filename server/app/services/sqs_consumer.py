@@ -22,16 +22,32 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_payload(body_json: Any) -> Dict[str, Any]:
-    """Extract payload from SQS message body. Handles SNS-wrapped and direct SQS."""
+    """
+    Extract payload from SQS message body. Handles SNS-wrapped and direct SQS.
+
+    - SNS-wrapped: body has Type=="Notification", payload is in Message (JSON string or dict).
+    - Direct SQS: body is the payload dict.
+    - Nested: if payload has a single key "data" or "body" that is a dict, unwrap once.
+    """
     if isinstance(body_json, dict) and body_json.get("Type") == "Notification":
         sns_message = body_json.get("Message", "{}")
         if isinstance(sns_message, dict):
-            return sns_message
-        try:
-            return json.loads(sns_message)
-        except json.JSONDecodeError:
-            return {"raw_message": sns_message}
+            out = sns_message
+        else:
+            try:
+                out = json.loads(sns_message)
+            except json.JSONDecodeError:
+                return {"raw_message": sns_message}
+        if isinstance(out, dict) and len(out) == 1:
+            only_key = next(iter(out.keys()), None)
+            if only_key in ("data", "body") and isinstance(out[only_key], dict):
+                return out[only_key]
+        return out if isinstance(out, dict) else {"raw_body": out}
     if isinstance(body_json, dict):
+        if len(body_json) == 1 and next(iter(body_json.keys()), None) in ("data", "body"):
+            inner = body_json.get("data") or body_json.get("body")
+            if isinstance(inner, dict):
+                return inner
         return body_json
     return {"raw_body": body_json}
 
@@ -110,13 +126,18 @@ def _handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> bo
     """
     Handle draft completion notification. Validate report_id; on status=completed
     PUT report-tracker and notify consumers. All logic inline; no aws/listeners.
+
+    Expected payload: report_id (or reportId), status, optional pr_id, transaction_id,
+    step_name, content_type, completed_date. See MESSAGING_CLEANUP_LOG.md.
     """
     try:
-        report_id = payload.get("report_id")
+        report_id = payload.get("report_id") or payload.get("reportId")
+        if isinstance(report_id, str):
+            report_id = report_id.strip() or None
         status = payload.get("status", "unknown")
         step_name = payload.get("step_name")
-        pr_id = payload.get("pr_id")
-        transaction_id = payload.get("transaction_id")
+        pr_id = payload.get("pr_id") or payload.get("prId")
+        transaction_id = payload.get("transaction_id") or payload.get("transactionId")
 
         logger.info(
             "Received assembler completion - report_id: %s, status: %s, step_name: %s, pr_id: %s, message_id: %s",
@@ -128,7 +149,10 @@ def _handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> bo
         )
 
         if not report_id:
-            logger.error("Missing report_id in assembler completion message")
+            logger.error(
+                "Missing report_id in assembler completion message; payload top-level keys: %s",
+                list(payload.keys()),
+            )
             return False
 
         if status == "completed":
