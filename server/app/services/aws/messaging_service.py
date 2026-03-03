@@ -72,16 +72,13 @@ class MessagingService:
         pr_id: Optional[str] = None,
         transaction_id: Optional[str] = None,
         action_code: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-        publish_to_sns: bool = True,
-        send_to_sqs: bool = True
+        additional_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Notify Content Assembler to start creating the first draft of the report.
 
-        This is called after creating a report tracker. The message is sent to:
-        - SNS Topic: For broadcasting (if publish_to_sns=True)
-        - SQS Queue: For direct consumption by assembler (if send_to_sqs=True)
+        This is called after creating a report tracker. The message is published to:
+        - SNS Topic: For broadcasting
 
         Message Format (flat structure):
         {
@@ -105,14 +102,12 @@ class MessagingService:
             transaction_id: Transaction identifier
             action_code: Action code for the workflow
             additional_data: Optional extra data to include in message
-            publish_to_sns: Whether to publish to SNS topic (default: True)
-            send_to_sqs: Whether to send to SQS queue (default: True)
 
         Returns:
-            Dictionary with 'sns_response' and/or 'sqs_response' keys
+            Dictionary with 'sns_response' key
 
         Raises:
-            MessagingServiceError: If messaging is disabled or both targets are skipped
+            MessagingServiceError: If messaging is disabled
         """
         logger.info(
             "notify_assembler_to_start: called, messaging_enabled=%s, report_id=%s",
@@ -120,13 +115,8 @@ class MessagingService:
             report_id,
         )
         if not settings.messaging_enabled:
-            logger.warning("notify_assembler_to_start: messaging_enabled=False, skipping (no SNS/SQS)")
+            logger.warning("notify_assembler_to_start: messaging_enabled=False, skipping (no SNS)")
             return {"status": "skipped", "reason": "messaging_disabled"}
-
-        if not publish_to_sns and not send_to_sqs:
-            raise MessagingServiceError(
-                "At least one of publish_to_sns or send_to_sqs must be True"
-            )
 
         timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -157,45 +147,24 @@ class MessagingService:
         result: Dict[str, Any] = {}
 
         # Publish to SNS
-        logger.info("notify_assembler_to_start: publishing to SNS (publish_to_sns=%s), SQS (send_to_sqs=%s)", publish_to_sns, send_to_sqs)
-        if publish_to_sns:
-            try:
-                sns_response = self.publisher.publish_to_sns(
-                    topic_name=settings.assembler_task_topic_name,
-                    message=message,
-                    subject="orchestrator-to-assembler_task",
-                    message_group_id=settings.assembler_message_group_id,
-                    message_deduplication_id=dedup_id
-                )
-                result["sns_response"] = sns_response
-                logger.info(
-                    "Published assembler task to SNS - report_id: %s, MessageId: %s",
-                    report_id,
-                    sns_response.get("MessageId", "unknown")
-                )
-            except Exception as e:
-                logger.error("notify_assembler_to_start: Failed to publish to SNS: %s: %s", type(e).__name__, str(e), exc_info=True)
-                result["sns_error"] = str(e)
-
-        # Send to SQS
-        if send_to_sqs:
-            try:
-                sqs_response = self.publisher.send_to_sqs(
-                    queue_name=settings.assembler_task_queue_name,
-                    message=message,
-                    message_group_id=settings.assembler_message_group_id,
-                    message_deduplication_id=f"{dedup_id}-sqs",
-                    queue_url=(settings.assembler_task_queue_url or None)
-                )
-                result["sqs_response"] = sqs_response
-                logger.info(
-                    "Sent assembler task to SQS - report_id: %s, MessageId: %s",
-                    report_id,
-                    sqs_response.get("MessageId", "unknown")
-                )
-            except Exception as e:
-                logger.error("notify_assembler_to_start: Failed to send to SQS: %s: %s", type(e).__name__, str(e), exc_info=True)
-                result["sqs_error"] = str(e)
+        logger.info("notify_assembler_to_start: publishing to SNS")
+        try:
+            sns_response = self.publisher.publish_to_sns(
+                topic_name=settings.assembler_task_topic_name,
+                message=message,
+                subject="orchestrator-to-assembler_task",
+                message_group_id=settings.assembler_message_group_id,
+                message_deduplication_id=dedup_id
+            )
+            result["sns_response"] = sns_response
+            logger.info(
+                "Published assembler task to SNS - report_id: %s, MessageId: %s",
+                report_id,
+                sns_response.get("MessageId", "unknown")
+            )
+        except Exception as e:
+            logger.error("notify_assembler_to_start: Failed to publish to SNS: %s: %s", type(e).__name__, str(e), exc_info=True)
+            result["sns_error"] = str(e)
 
         logger.info("notify_assembler_to_start: done, result keys=%s", list(result.keys()))
         return result
@@ -256,9 +225,7 @@ class MessagingService:
         pr_id: Optional[str] = None,
         transaction_id: Optional[str] = None,
         status: str = "completed",
-        additional_data: Optional[Dict[str, Any]] = None,
-        publish_to_sns: bool = True,
-        send_to_sqs: bool = False
+        additional_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Notify consumer applications about a report update.
@@ -286,8 +253,6 @@ class MessagingService:
             transaction_id: Optional transaction identifier.
             status: Status of the event (default "completed").
             additional_data: Optional extra payload for consumers (stored in message["data"]).
-            publish_to_sns: Whether to publish to SNS (default True).
-            send_to_sqs: Whether to send to SQS (default False).
 
         Returns:
             Dictionary with response information.
@@ -323,45 +288,24 @@ class MessagingService:
 
         result: Dict[str, Any] = {}
 
-        # Publish to SNS (primary for fan-out to multiple consumers)
-        if publish_to_sns:
-            try:
-                sns_response = self.publisher.publish_to_sns(
-                    topic_name=settings.consumer_notification_topic_name,
-                    message=message,
-                    subject=f"report_update_{event_type}",
-                    message_group_id=settings.consumer_notification_message_group_id,
-                    message_deduplication_id=dedup_id
-                )
-                result["sns_response"] = sns_response
-                logger.info(
-                    "Published consumer notification to SNS - report_id: %s, event: %s",
-                    report_id,
-                    event_type
-                )
-            except Exception as e:
-                logger.error("Failed to publish consumer notification to SNS: %s", str(e))
-                result["sns_error"] = str(e)
-
-        # Send to SQS (optional, for single consumer or backup)
-        if send_to_sqs:
-            try:
-                sqs_response = self.publisher.send_to_sqs(
-                    queue_name=settings.consumer_notification_queue_name,
-                    message=message,
-                    message_group_id=settings.consumer_notification_message_group_id,
-                    message_deduplication_id=f"{dedup_id}-sqs",
-                    queue_url=(settings.consumer_notification_queue_url or None)
-                )
-                result["sqs_response"] = sqs_response
-                logger.info(
-                    "Sent consumer notification to SQS - report_id: %s, event: %s",
-                    report_id,
-                    event_type
-                )
-            except Exception as e:
-                logger.error("Failed to send consumer notification to SQS: %s", str(e))
-                result["sqs_error"] = str(e)
+        # Publish to SNS (fan-out to multiple consumers)
+        try:
+            sns_response = self.publisher.publish_to_sns(
+                topic_name=settings.consumer_notification_topic_name,
+                message=message,
+                subject=f"report_update_{event_type}",
+                message_group_id=settings.consumer_notification_message_group_id,
+                message_deduplication_id=dedup_id
+            )
+            result["sns_response"] = sns_response
+            logger.info(
+                "Published consumer notification to SNS - report_id: %s, event: %s",
+                report_id,
+                event_type
+            )
+        except Exception as e:
+            logger.error("Failed to publish consumer notification to SNS: %s", str(e))
+            result["sns_error"] = str(e)
 
         return result
 
