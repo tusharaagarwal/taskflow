@@ -65,8 +65,6 @@ async def create_report_tracker(
                     pr_id=tracker.pr_id,
                     transaction_id=tracker.transaction_id,
                     action_code=tracker.action_code,
-                    publish_to_sns=True,
-                    send_to_sqs=False
                 )
                 logger.info(
                     "Report tracker create: Notified Content Assembler for report_id: %s - Result: %s",
@@ -189,8 +187,6 @@ async def update_report_tracker(
                     transaction_id=tracker.transaction_id,
                     status="completed",
                     additional_data=additional if additional else None,
-                    publish_to_sns=True,
-                    send_to_sqs=True,
                 )
                 update_logger.info(
                     "Report tracker update: Notified consumers - report_id: %s, action: %s",
