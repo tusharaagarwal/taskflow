@@ -72,7 +72,7 @@ class MessagingService:
         pr_id: Optional[str] = None,
         transaction_id: Optional[str] = None,
         action_code: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None
+        additional_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Notify Content Assembler to start creating the first draft of the report.
@@ -225,7 +225,7 @@ class MessagingService:
         pr_id: Optional[str] = None,
         transaction_id: Optional[str] = None,
         status: str = "completed",
-        additional_data: Optional[Dict[str, Any]] = None
+        additional_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Notify consumer applications about a report update.
