@@ -191,7 +191,7 @@ class ConfigManager:
             "access_key_id": self._get_config_value("AWS_ACCESS_KEY_ID", ""),
             "secret_access_key": self._get_config_value("AWS_SECRET_ACCESS_KEY", ""),
             "session_token": self._get_config_value("AWS_SESSION_TOKEN", ""),
-            "messaging_enabled": self._parse_bool(self._get_config_value("MESSAGING_ENABLED", False)),
+            "messaging_enabled": self._parse_bool(self._get_config_value("MESSAGING_ENABLED", True)),
             "assembler_task_queue_name": self._get_config_value("ASSEMBLER_TASK_QUEUE_NAME", "orchestrator-to-assembler"),
             "assembler_task_topic_name": self._get_config_value("ASSEMBLER_TASK_TOPIC_NAME", "orchestrator-to-assembler"),
             "assembler_message_group_id": self._get_config_value("ASSEMBLER_MESSAGE_GROUP_ID", "CreditOpinionAssembler-group-1"),
