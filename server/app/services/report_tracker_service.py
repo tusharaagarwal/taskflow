@@ -1091,6 +1091,11 @@ class ReportTrackerService:
         
         progress_tracker = tracker.workflow_steps_json.get("progress_tracker", []) if tracker.workflow_steps_json else []
         
+        # TODO: Figure out where to add due_date for each step in the existing /status API.
+        # Steps are built in create_workflow_steps_json (schemas) and _build_happy_path (service);
+        # they have 'sla' (may contain due_date) and 'app_data' but no top-level due_date.
+        # Either add due_date when building step objects, or enrich each step here before returning.
+        
         return {
             "report_id": tracker.report_id,
             "progress_tracker": progress_tracker
@@ -1123,6 +1128,135 @@ class ReportTrackerService:
             progress_tracker
         )
         return status_data
+
+    @staticmethod
+    def get_due_date(step: dict) -> str:
+        """
+        Return due_date for a step for use in status_lite response.
+        TODO: Implement later - e.g. from step["app_data"].get("due_date") or
+        step.get("sla", {}).get("due_date"). For now returns empty string.
+        """
+        return ""
+
+    @staticmethod
+    def format_date_for_lite(iso_string: Optional[str]) -> Optional[str]:
+        """
+        Convert ISO 8601 datetime to MM/DD/YYYY HH:MM:SS AM/PM for status_lite.
+        Returns "" for missing/empty start date, None for missing completed date.
+        """
+        if not iso_string or not iso_string.strip():
+            return None
+        try:
+            from dateutil import parser as date_parser
+            dt = date_parser.parse(iso_string)
+            if dt.tzinfo:
+                dt = dt.astimezone(timezone.utc)
+            else:
+                dt = dt.replace(tzinfo=timezone.utc)
+            hour = dt.hour
+            minute = dt.minute
+            second = dt.second
+            am_pm = "AM" if hour < 12 else "PM"
+            hour12 = hour % 12 or 12
+            return dt.strftime("%m/%d/%Y") + f" {hour12:02d}:{minute:02d}:{second:02d} {am_pm}"
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _role_for_lite(step: dict, assignee_value: str) -> str:
+        """Return role string for lite stage: N/A when Unassigned, else actor.role formatted or first assignee role."""
+        if assignee_value == "Unassigned":
+            return "N/A"
+        actor = step.get("actor") if isinstance(step.get("actor"), dict) else {}
+        role_raw = actor.get("role") if actor else None
+        if role_raw is None or str(role_raw).upper() in ("NA", "N/A", ""):
+            return "N/A"
+        s = str(role_raw).strip()
+        return s.replace("_", " ").title() if s else "N/A"
+
+    @staticmethod
+    def _first_active_assignee_name(step: dict) -> str:
+        """First active assignee's user_name or name; if none or list empty return Unassigned."""
+        app_data = step.get("app_data") or {}
+        assignees = app_data.get("assignee")
+        if not isinstance(assignees, list) or len(assignees) == 0:
+            return "Unassigned"
+        for a in assignees:
+            if not isinstance(a, dict):
+                continue
+            name = a.get("user_name") or a.get("name")
+            if name and str(name).strip():
+                return str(name).strip()
+        return "Unassigned"
+
+    @staticmethod
+    def _status_for_lite(raw_status: Any) -> str:
+        """Map raw status to pending | current | completed."""
+        s = (raw_status or "").strip().lower()
+        if s == "completed":
+            return "completed"
+        if s in ("in_progress", "retry"):
+            return "current"
+        return "pending"
+
+    @staticmethod
+    def _progress_tracker_to_stages_lite(progress_tracker: List[Any]) -> List[Dict[str, Any]]:
+        """
+        Convert progress_tracker to list of stage dicts for status_lite.
+        id = 1-based position (1, 2, 3, ...). Uniqueness in raw data is instance_id; not exposed.
+        """
+        stages: List[Dict[str, Any]] = []
+        for i, step in enumerate(progress_tracker):
+            if not isinstance(step, dict):
+                continue
+            step_id = i + 1
+            title = (step.get("step_name") or step.get("step_id") or "").strip() or "—"
+            assignee = ReportTrackerService._first_active_assignee_name(step)
+            role = ReportTrackerService._role_for_lite(step, assignee)
+            due_date = ReportTrackerService.get_due_date(step)
+            started_at = step.get("started_at")
+            start_date_val = ReportTrackerService.format_date_for_lite(started_at)
+            start_date = start_date_val if start_date_val is not None else ""
+            completed_at = step.get("completed_at")
+            completed_date_val = ReportTrackerService.format_date_for_lite(completed_at)
+            completed_date = completed_date_val
+            raw_status = step.get("status")
+            status_str = ReportTrackerService._status_for_lite(raw_status)
+            stages.append({
+                "id": step_id,
+                "title": title,
+                "assignee": assignee,
+                "role": role,
+                "due_date": due_date or "",
+                "start_date": start_date,
+                "completed_date": completed_date,
+                "status": status_str,
+            })
+        return stages
+
+    @staticmethod
+    async def get_status_lite(
+        db: AsyncSession,
+        report_id: str,
+        exclude_assembler: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get status in lite format: report_id + stages (snake_case, 1-based id, normalized status).
+        If exclude_assembler True, stages start from first human step.
+        """
+        status_data = await ReportTrackerService.get_status(db, report_id)
+        if not status_data:
+            return None
+        progress_tracker = status_data.get("progress_tracker", [])
+        if exclude_assembler:
+            progress_tracker = ReportTrackerService._get_progress_tracker_exclude_first_assembler_step(
+                progress_tracker
+            )
+        stages = ReportTrackerService._progress_tracker_to_stages_lite(progress_tracker)
+        return {
+            "report_id": status_data["report_id"],
+            "stages": stages,
+        }
 
     @staticmethod
     async def assign_user_to_step(

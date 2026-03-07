@@ -4,7 +4,8 @@ from typing import List
 
 from app.db.database import get_db
 from app.schemas.report_tracker import (
-    ReportTrackerStatusResponse, 
+    ReportTrackerStatusResponse,
+    ReportTrackerStatusLiteResponse,
     ReportTrackerResponse, 
     ReportTrackerCreateRequest, 
     ReportTrackerListResponse,
@@ -246,6 +247,33 @@ async def get_status_exclude_first_assembler_step(
     excluding the leading agent assembler step. Same response shape as GET /{report_id}/status.
     """
     status_data = await ReportTrackerService.get_status_exclude_first_assembler_step(db, report_id)
+    if not status_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report tracker with report_id '{report_id}' not found"
+        )
+    return status_data
+
+
+@router.get("/{report_id}/status_lite", response_model=ReportTrackerStatusLiteResponse)
+async def get_report_status_lite(
+    report_id: str,
+    exclude_assembler: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get report status in lite format: report_id and stages array only.
+
+    **Response:** report_id (string), stages (array of stage objects with snake_case fields):
+    id (1-based int), title, assignee, role, due_date, start_date, completed_date, status.
+    Dates in MM/DD/YYYY HH:MM:SS AM/PM; start_date empty string if not started;
+    completed_date null if not completed. status is one of: pending, current, completed.
+
+    **Query Parameters:**
+    - exclude_assembler (bool, default: false): If true, stages start from the first human step,
+      excluding the leading agent assembler step.
+    """
+    status_data = await ReportTrackerService.get_status_lite(db, report_id, exclude_assembler=exclude_assembler)
     if not status_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing import Optional, Literal, Any, Dict
+from typing import Optional, Literal, Any, Dict, List
 from datetime import datetime, timezone
 from uuid import UUID
 import uuid
@@ -291,6 +291,35 @@ class ReportTrackerStatusResponse(BaseModel):
     """
     report_id: str
     progress_tracker: list
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StageLite(BaseModel):
+    """
+    Lightweight stage object for status_lite API.
+    All fields snake_case to match existing /status API.
+    id is 1-based position in the list (1, 2, 3, ...).
+    """
+    id: int = Field(..., description="1-based position in stages list")
+    title: str = Field(..., description="Display label (step_name or step_id)")
+    assignee: str = Field(..., description="First active assignee or Unassigned")
+    role: str = Field(..., description="Role or N/A")
+    due_date: str = Field(default="", description="From get_due_date(step); reserved")
+    start_date: str = Field(..., description="MM/DD/YYYY HH:MM:SS AM/PM or empty")
+    completed_date: Optional[str] = Field(None, description="Same format as start_date or null")
+    status: str = Field(..., description="pending | current | completed")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReportTrackerStatusLiteResponse(BaseModel):
+    """
+    Response schema for status_lite API.
+    report_id + stages (array of StageLite); snake_case.
+    """
+    report_id: str
+    stages: List[StageLite]
 
     model_config = ConfigDict(from_attributes=True)
 
