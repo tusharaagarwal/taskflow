@@ -239,7 +239,7 @@ class ReportTrackerService:
             return False
             
         transitions = step_json.get("transitions", {})
-        success_goto = transitions.get("success_goto")
+        success_goto = ReportTrackerService._get_default_transition(transitions.get("success_goto"))
         
         return not success_goto or success_goto == "NA"
 
@@ -693,7 +693,7 @@ class ReportTrackerService:
                         break
                     
                     transitions = next_step_json.get("transitions", {})
-                    next_step_id = transitions.get("success_goto")
+                    next_step_id = ReportTrackerService._get_default_transition(transitions.get("success_goto"))
                     
                     if not next_step_id or next_step_id == "NA":
                         break
