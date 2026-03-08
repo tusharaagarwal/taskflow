@@ -307,8 +307,8 @@ class StageLite(BaseModel):
     role: str = Field(..., description="Role or N/A")
     due_date: str = Field(default="", description="From get_due_date(step); reserved")
     start_date: str = Field(..., description="MM/DD/YYYY HH:MM:SS AM/PM or empty")
-    completed_date: Optional[str] = Field(None, description="Same format as start_date or null")
-    status: str = Field(..., description="pending | current | completed")
+    completed_date: str = Field(default="", description="MM/DD/YYYY HH:MM:SS AM/PM or empty string if not completed")
+    status: str = Field(..., description="Same as GET /status: yet_to_start, in_progress, completed, retry, skipped, rejected; empty string if missing")
 
     model_config = ConfigDict(from_attributes=True)
 

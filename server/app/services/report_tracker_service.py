@@ -1164,9 +1164,19 @@ class ReportTrackerService:
 
     @staticmethod
     def _role_for_lite(step: dict, assignee_value: str) -> str:
-        """Return role string for lite stage: N/A when Unassigned, else actor.role formatted or first assignee role."""
+        """Return role string for lite stage: N/A when Unassigned, else first assignee's role from app_data, then actor.role."""
         if assignee_value == "Unassigned":
             return "N/A"
+        app_data = step.get("app_data") or {}
+        assignees = app_data.get("assignee")
+        if isinstance(assignees, list) and len(assignees) > 0:
+            for a in assignees:
+                if not isinstance(a, dict):
+                    continue
+                role_raw = a.get("role")
+                if role_raw is not None and str(role_raw).strip():
+                    s = str(role_raw).strip()
+                    return s.replace("_", " ").title() if s else "N/A"
         actor = step.get("actor") if isinstance(step.get("actor"), dict) else {}
         role_raw = actor.get("role") if actor else None
         if role_raw is None or str(role_raw).upper() in ("NA", "N/A", ""):
@@ -1190,16 +1200,6 @@ class ReportTrackerService:
         return "Unassigned"
 
     @staticmethod
-    def _status_for_lite(raw_status: Any) -> str:
-        """Map raw status to pending | current | completed."""
-        s = (raw_status or "").strip().lower()
-        if s == "completed":
-            return "completed"
-        if s in ("in_progress", "retry"):
-            return "current"
-        return "pending"
-
-    @staticmethod
     def _progress_tracker_to_stages_lite(progress_tracker: List[Any]) -> List[Dict[str, Any]]:
         """
         Convert progress_tracker to list of stage dicts for status_lite.
@@ -1219,9 +1219,9 @@ class ReportTrackerService:
             start_date = start_date_val if start_date_val is not None else ""
             completed_at = step.get("completed_at")
             completed_date_val = ReportTrackerService.format_date_for_lite(completed_at)
-            completed_date = completed_date_val
+            completed_date = completed_date_val if completed_date_val is not None else ""
             raw_status = step.get("status")
-            status_str = ReportTrackerService._status_for_lite(raw_status)
+            status_str = (raw_status or "").strip() if raw_status is not None else ""
             stages.append({
                 "id": step_id,
                 "title": title,

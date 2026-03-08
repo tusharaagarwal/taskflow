@@ -155,6 +155,8 @@ async def update_report_tracker(
     **Validation:**
     - At least one of 'action' or 'app_data' must be provided
     - If instance_id provided, step must exist in progress tracker
+
+    **Assignee in status_lite:** To show assignee on the in-progress step, use app_data only (no action) for the current step, or instance_id + app_data (no action) for any step; status_lite will reflect it when that step is current.
     """
     try:
         tracker = await ReportTrackerService.update(db, report_id, update_data)
@@ -267,7 +269,7 @@ async def get_report_status_lite(
     **Response:** report_id (string), stages (array of stage objects with snake_case fields):
     id (1-based int), title, assignee, role, due_date, start_date, completed_date, status.
     Dates in MM/DD/YYYY HH:MM:SS AM/PM; start_date empty string if not started;
-    completed_date null if not completed. status is one of: pending, current, completed.
+    completed_date empty string if not completed. status is the same as GET /status (e.g. yet_to_start, in_progress, completed, retry, skipped, rejected), or empty string if missing.
 
     **Query Parameters:**
     - exclude_assembler (bool, default: false): If true, stages start from the first human step,

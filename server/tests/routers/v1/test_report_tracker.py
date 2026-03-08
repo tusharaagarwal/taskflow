@@ -1030,10 +1030,13 @@ class TestStatusLite:
         assert "role" in first
         assert first["due_date"] == ""
         assert "start_date" in first
-        assert first["status"] in ("pending", "current", "completed")
+        assert first["status"] in ("yet_to_start", "in_progress", "completed", "retry", "skipped", "rejected", "")
         assert "completed_date" in first
-        if first.get("completed_date") is not None:
-            assert isinstance(first["completed_date"], str)
+        assert isinstance(first["completed_date"], str), "completed_date must be string (empty if not completed)"
+        for stage in stages:
+            assert isinstance(stage["completed_date"], str)
+            if stage.get("status") != "completed":
+                assert stage["completed_date"] == "", "uncompleted stage must have completed_date empty string"
 
     @pytest.mark.asyncio
     async def test_get_report_status_lite_not_found(self, client, db):
@@ -1085,7 +1088,7 @@ class TestStatusLite:
 
     @pytest.mark.asyncio
     async def test_get_report_status_lite_status_mapping(self, client, db_with_content_products):
-        """Raw status maps to pending/current/completed: completed→completed, in_progress/retry→current, else→pending."""
+        """status_lite returns raw status from GET /status with no mapping (pass-through)."""
         pt = [
             {
                 "instance_id": "i1",
@@ -1143,9 +1146,9 @@ class TestStatusLite:
         data = response.json()
         stages = {s["id"]: s for s in data["stages"]}
         assert stages[1]["status"] == "completed"
-        assert stages[2]["status"] == "current"
-        assert stages[3]["status"] == "pending"
-        assert stages[4]["status"] == "current"
+        assert stages[2]["status"] == "in_progress"
+        assert stages[3]["status"] == "yet_to_start"
+        assert stages[4]["status"] == "retry"
 
     @pytest.mark.asyncio
     async def test_get_report_status_lite_exclude_assembler(self, client, db, mock_cpm_and_workflow):
