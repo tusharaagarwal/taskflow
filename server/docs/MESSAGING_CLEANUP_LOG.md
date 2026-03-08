@@ -150,11 +150,11 @@ The project has **two separate AWS config sources**. Use this when refactoring s
 
 | Resource | Config key / default name | Notes |
 |----------|---------------------------|--------|
-| **SNS topic** | `consumer_notification_topic_name` → default **orchestrator-to-authoring** | Used when notifying consumer applications (e.g. after assembler completion). Must **not** be the same as the assembler completion queue/topic (e.g. assembler-to-orchestrator) or messages will loop back. Create in AWS SNS in the same region. |
+| **SNS topic** | `consumer_notification_topic_name` → default **orchestrator-to-workspace** | Used when notifying consumer applications (e.g. after assembler completion). Must **not** be the same as the assembler completion queue/topic (e.g. assembler-to-orchestrator) or messages will loop back. Create in AWS SNS in the same region. |
 | **SNS topic** | `assembler_task_topic_name` → default **orchestrator-to-assembler** | Used when sending assembly tasks to the assembler. Must exist in the same region. |
 | **SQS queue** | `assembler_completion_queue_name` → default `assembler-to-orchestrator` | Orchestrator consumes assembler completion messages from this queue. Create in AWS SQS if missing. |
 | **SQS queue** | `assembler_task_queue_name` → default `orchestrator-to-assembler` | Used for assembler tasks. Create in AWS SQS if missing. |
-| **SQS queue** | `consumer_notification_queue_name` → default **orchestrator-to-authoring** | Queue for consumer applications (e.g. authoring) to receive orchestrator notifications. Subscribe to the consumer notification SNS topic or receive directly; must not be assembler-to-orchestrator. |
+| **SQS queue** | `consumer_notification_queue_name` → default **orchestrator-to-workspace** | Queue for consumer applications (e.g. authoring) to receive orchestrator notifications. Subscribe to the consumer notification SNS topic or receive directly; must not be assembler-to-orchestrator. |
 
 ---
 
@@ -240,7 +240,7 @@ Set this in `config_{environment}.json` and/or `.env_{environment}` (env var map
 | Script | Purpose |
 |--------|---------|
 | **`scripts/run_assembler_completion_consumer.py`** | **Starts the API** (uvicorn). The in-process SQS consumer (app.services.sqs_consumer) consumes from **assembler-to-orchestrator** and runs the handler (PUT report-tracker, then notify consumers). |
-| **`scripts/run_consumer_notification_consumer.py`** | Consumes from **orchestrator-to-authoring** queue (consumer notification queue); logs each message for testing. Run in a separate terminal to verify notifications reach consumer apps. |
+| **`scripts/run_consumer_notification_consumer.py`** | Consumes from **orchestrator-to-workspace** queue (consumer notification queue); logs each message for testing. Run in a separate terminal to verify notifications reach consumer apps. |
 | **`scripts/publish_dummy_assembler_completion.py`** | Publishes a dummy assembler completion message to **assembler-to-orchestrator** SQS for testing without the real content-assembler. |
 
 See **TESTING_ASSEMBLER_FLOW.md** for full steps (AWS SSO, refresh credentials, start backends, run both consumers, publish dummy message).
@@ -262,7 +262,7 @@ See **TESTING_ASSEMBLER_FLOW.md** for full steps (AWS SSO, refresh credentials, 
 | *(doc)* | **Documented** AWS configuration: two sources (config_loader → settings for aws/* path; aws_config.json for agent path), full key list, precedence, and refactoring notes. |
 | *(config)* | **Assembler → orchestrator queue:** Set `assembler_completion_queue_name` to **assembler-to-orchestrator** so when the assembler notifies the orchestrator, it sends to this queue and the orchestrator consumes from it. Updated `config_loader.py` default, `config_dev.json`, and `app/config/config.py` fallback. |
 | *(feature)* | **Assembler completion flow:** On receipt of assembler completion message with `status == "completed"`, handler now (1) PUTs to orchestrator API `PUT /v1/report-tracker/{report_id}` with `action=accept` and optional `app_data`, (2) on success calls `notify_draft_completed`. Added `ORCHESTRATOR_API_BASE_URL` / `orchestrator_api_base_url` for the consumer process. Documented payload schema and flow in "Assembler completion message format" and config table. |
-| *(config)* | **Topic/queue alignment:** `assembler_task_topic_name` default → **orchestrator-to-assembler**; `consumer_notification_topic_name` and `consumer_notification_queue_name` default → **orchestrator-to-authoring** (separate from assembler-to-orchestrator to avoid feedback loop). Updated config_loader, config_dev.json, app config. |
+| *(config)* | **Topic/queue alignment:** `assembler_task_topic_name` default → **orchestrator-to-assembler**; `consumer_notification_topic_name` and `consumer_notification_queue_name` default → **orchestrator-to-workspace** (separate from assembler-to-orchestrator to avoid feedback loop). Updated config_loader, config_dev.json, app config. |
 | *(scripts)* | **Standalone scripts:** Added `scripts/run_assembler_completion_consumer.py`, `scripts/run_consumer_notification_consumer.py`, `scripts/publish_dummy_assembler_completion.py`. See "Standalone scripts (testing)" and TESTING_ASSEMBLER_FLOW.md. |
 | *(doc)* | **TESTING_ASSEMBLER_FLOW.md:** Full testing guide (AWS SSO, refresh credentials, start backends, content-assembler subscribe, assembler completion consumer, dummy publish, consumer notification consumer as Step 6). Use Set-Location for PowerShell. |
 | *(payload)* | **Assembler completion:** Dropped old payload. New payload only: report_id, pr_id, transaction_id, content_type, step_name, status, completed_date. PUT body is `{"action": "accept"}` only. workflow_id and draft_url are not forwarded to consumer applications (notify_draft_completed called with None). Updated listeners, messaging_service docstring, publish_dummy_assembler_completion.py, MESSAGING_CLEANUP_LOG.md, TESTING_ASSEMBLER_FLOW.md. |

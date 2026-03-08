@@ -167,7 +167,7 @@ async def update_report_tracker(
                 detail=f"Report tracker with report_id '{report_id}' not found"
             )
 
-        # Notify consumer applications (orchestrator-to-authoring) on any workflow update
+        # Notify consumer applications (orchestrator-to-workspace) on any workflow update
         import logging
         from app.services.aws.messaging_service import get_messaging_service
         from app.config.config import settings

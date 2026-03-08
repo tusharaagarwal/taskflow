@@ -101,16 +101,16 @@ poetry run python scripts/publish_dummy_assembler_completion.py --report-id RPT-
 
 Ensure the **orchestrator API** is up (Step 3 or Step 5); the in-process SQS consumer will process the message and apply the report-tracker update.
 
-## Step 6: Consumer notification queue (orchestrator-to-authoring)
+## Step 6: Consumer notification queue (orchestrator-to-workspace)
 
-To test that notifications from the orchestrator (e.g. draft_completed) reach the **consumer applications** queue, run a consumer that reads from **orchestrator-to-authoring**:
+To test that notifications from the orchestrator (e.g. draft_completed) reach the **consumer applications** queue, run a consumer that reads from **orchestrator-to-workspace**:
 
 ```powershell
 Set-Location "c:\Users\Tusshar Agarwaal\projects\cognida\workflow_orchestrator\server"
 poetry run python scripts/run_consumer_notification_consumer.py
 ```
 
-This script consumes from `consumer_notification_queue_name` (default **orchestrator-to-authoring**), logs each message (report_id, pr_id, transaction_id, type, status), and deletes it after processing. Consumer notifications use `notify_consumers()` with report_id, pr_id, transaction_id, and event_type (e.g. draft_completed). Use it to verify that when the assembler completion handler runs, the notification reaches this queue. Stop with **Ctrl+C**.
+This script consumes from `consumer_notification_queue_name` (default **orchestrator-to-workspace**), logs each message (report_id, pr_id, transaction_id, type, status), and deletes it after processing. Consumer notifications use `notify_consumers()` with report_id, pr_id, transaction_id, and event_type (e.g. draft_completed). Use it to verify that when the assembler completion handler runs, the notification reaches this queue. Stop with **Ctrl+C**.
 
 ## Summary of terminals
 
@@ -120,7 +120,7 @@ This script consumes from `consumer_notification_queue_name` (default **orchestr
 | 2 | `start-all-cognida-backends.ps1` (opens multiple app windows; orchestrator runs SQS consumer in-process) |
 | 3 | content-assembler: `poetry run python app/utils/aws/subscribe_messages.py` |
 | 4 | (Optional) workflow_orchestrator: `poetry run python scripts/run_assembler_completion_consumer.py` – starts API only if not using start-all-cognida-backends |
-| 5 | workflow_orchestrator: `poetry run python scripts/run_consumer_notification_consumer.py` (test orchestrator-to-authoring queue) |
+| 5 | workflow_orchestrator: `poetry run python scripts/run_consumer_notification_consumer.py` (test orchestrator-to-workspace queue) |
 
 ## Troubleshooting: "Topic does not exist" (SNS)
 
@@ -138,7 +138,7 @@ the **consumer notification SNS topic** is not present in your AWS account/regio
 
 2. **Or use an existing topic name** by overriding config:
    - Set env var: `$env:CONSUMER_NOTIFICATION_TOPIC_NAME = "your-existing-fifo-topic.fifo"`
-   - Or in `config_dev.json`: `"consumer_notification_topic_name": "your-existing-fifo-topic.fifo"`
+   - Or in `config_dev.json`: `"consumer_notification_topic_name": "your-existing-fifo-topic.fifo"` (default is **orchestrator-to-workspace**)
 
 The topic **must be FIFO** (name must end with `.fifo`). Same applies to `assembler_task_topic_name` (`workflow_orchestrator_topic.fifo`) if you use assembler notifications.
 
