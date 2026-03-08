@@ -20,9 +20,14 @@ logger = logging.getLogger(__name__)
 class ReportTrackerService:
     """
     Service for managing report tracker workflows.
-    
+
     Handles creation, retrieval, and progression of report workflows through various stages.
     Each workflow consists of steps that can be accepted (move forward) or rejected (move backward).
+
+    TODO (broader level): Introduce a validator/schema governing how app_data is updated (on PUT, assign-user, merge)
+    so that consumer apps maintain a consistent structure (e.g. fixed keys like assignee), avoid conflicting keys,
+    and avoid overwriting existing data in an undefined way. Applies to the update path (request validation, merge
+    logic when applying app_data to a step), not to getters like _role_for_lite which only read from app_data.
     """
     
     def __init__(self):
@@ -1143,6 +1148,10 @@ class ReportTrackerService:
         """
         Convert ISO 8601 datetime to MM/DD/YYYY HH:MM:SS AM/PM for status_lite.
         Returns "" for missing/empty start date, None for missing completed date.
+
+        TODO: Refactor into a shared utility (e.g. app.utils.date_utils or app.utils.format_utils). If the same
+        ISO -> MM/DD/YYYY HH:MM:SS AM/PM logic exists elsewhere, call that function instead of duplicating.
+        Do not change behavior or call sites until refactor.
         """
         if not iso_string or not iso_string.strip():
             return None
@@ -1161,6 +1170,11 @@ class ReportTrackerService:
             return dt.strftime("%m/%d/%Y") + f" {hour12:02d}:{minute:02d}:{second:02d} {am_pm}"
         except (ValueError, TypeError):
             return None
+
+    # TODO: Reusable getter functions for any computed/derived field from step or app_data (not just raw DB): single
+    # place (this service or a small shared module) for assignee, role, start_date, completed_date, due_date, and
+    # other derived values. One function per concept; use in status_lite, Pydantic models, and other callers.
+    # (Note: _role_for_lite and _first_active_assignee_name are such getters.)
 
     @staticmethod
     def _role_for_lite(step: dict, assignee_value: str) -> str:
@@ -1183,6 +1197,9 @@ class ReportTrackerService:
             return "N/A"
         s = str(role_raw).strip()
         return s.replace("_", " ").title() if s else "N/A"
+
+    # TODO: get_role for lite (and any future role derivation) should be aligned with GET /status; _role_for_lite
+    # (or a renamed shared helper) should be the single reusable function; refactor all callers to use it.
 
     @staticmethod
     def _first_active_assignee_name(step: dict) -> str:

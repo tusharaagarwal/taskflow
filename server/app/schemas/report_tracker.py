@@ -295,20 +295,20 @@ class ReportTrackerStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# TODO: Maintain status_lite / GET /status step status values (yet_to_start, in_progress, completed, retry, skipped, rejected) via variables or enums per FastAPI guidelines (e.g. Literal or Enum in app.constants) so they are not hardcoded; use for API docs and validation.
 class StageLite(BaseModel):
     """
     Lightweight stage object for status_lite API.
-    All fields snake_case to match existing /status API.
     id is 1-based position in the list (1, 2, 3, ...).
     """
-    id: int = Field(..., description="1-based position in stages list")
+    id: int = Field(..., description="1-based position in stages list (1 = first step, 2 = second step, …).")
     title: str = Field(..., description="Display label (step_name or step_id)")
-    assignee: str = Field(..., description="First active assignee or Unassigned")
-    role: str = Field(..., description="Role or N/A")
-    due_date: str = Field(default="", description="From get_due_date(step); reserved")
-    start_date: str = Field(..., description="MM/DD/YYYY HH:MM:SS AM/PM or empty")
-    completed_date: str = Field(default="", description="MM/DD/YYYY HH:MM:SS AM/PM or empty string if not completed")
-    status: str = Field(..., description="Same as GET /status: yet_to_start, in_progress, completed, retry, skipped, rejected; empty string if missing")
+    assignee: str = Field(..., description="Assignee")
+    role: str = Field(..., description="Role")
+    due_date: str = Field(default="", description="Due Date")
+    start_date: str = Field(..., description="MM/DD/YYYY HH:MM:SS AM/PM")
+    completed_date: str = Field(default="", description="MM/DD/YYYY HH:MM:SS AM/PM")
+    status: str = Field(..., description="yet_to_start, in_progress, completed, retry, skipped, rejected")
 
     model_config = ConfigDict(from_attributes=True)
 
