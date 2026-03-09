@@ -1,5 +1,5 @@
 """
-Standalone script to consume from the consumer notification queue (orchestrator-to-authoring).
+Standalone script to consume from the consumer notification queue (orchestrator-to-workspace).
 
 Uses the same async consumer pattern as the in-process sqs_consumer (worklist-style).
 Messages are logged and then deleted. No import from app.services.aws.consumer.
@@ -9,7 +9,7 @@ Usage (from workflow_orchestrator/server):
 
 Requires:
   - AWS credentials
-  - Queue name from config: consumer_notification_queue_name (default orchestrator-to-authoring)
+  - Queue name from config: consumer_notification_queue_name (default orchestrator-to-workspace)
 """
 import asyncio
 import json
@@ -87,7 +87,7 @@ async def _run_consumer() -> None:
         logger.warning("Messaging is disabled. Set messaging_enabled in config.")
         return
 
-    queue_name = getattr(settings, "consumer_notification_queue_name", "orchestrator-to-authoring")
+    queue_name = getattr(settings, "consumer_notification_queue_name", "orchestrator-to-workspace")
     queue_url_cfg = (getattr(settings, "consumer_notification_queue_url", None) or "").strip()
     region = getattr(settings, "aws_region", "ap-south-1")
 

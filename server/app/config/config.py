@@ -217,8 +217,8 @@ class Settings:
             self.assembler_completion_queue_name: str = "assembler-to-orchestrator"
             self.assembler_task_queue_url: str = ""
             self.assembler_completion_queue_url: str = ""
-            self.consumer_notification_topic_name: str = "orchestrator-to-authoring"
-            self.consumer_notification_queue_name: str = "orchestrator-to-authoring"
+            self.consumer_notification_topic_name: str = "orchestrator-to-workspace"
+            self.consumer_notification_queue_name: str = "orchestrator-to-workspace"
             self.consumer_notification_queue_url: str = ""
             self.consumer_notification_message_group_id: str = "consumer-notification-group-1"
             self.sqs_max_messages: int = 10
@@ -231,7 +231,7 @@ class Settings:
                 self.host, self.port
             )
             self.assembler_queue_name: str = "orchestrator-to-assembler"
-            self.report_update_topic_name: str = "orchestrator-to-authoring"
+            self.report_update_topic_name: str = "orchestrator-to-workspace"
 
 
 # Single instance

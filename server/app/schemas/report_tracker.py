@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from typing import Optional, Literal, Any, Dict
+from typing import Optional, Literal, Any, Dict, List
 from datetime import datetime, timezone
 from uuid import UUID
 import uuid
@@ -291,6 +291,35 @@ class ReportTrackerStatusResponse(BaseModel):
     """
     report_id: str
     progress_tracker: list
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# TODO: Maintain status_lite / GET /status step status values (yet_to_start, in_progress, completed, retry, skipped, rejected) via variables or enums per FastAPI guidelines (e.g. Literal or Enum in app.constants) so they are not hardcoded; use for API docs and validation.
+class StageLite(BaseModel):
+    """
+    Lightweight stage object for status_lite API.
+    id is 1-based position in the list (1, 2, 3, ...).
+    """
+    id: int = Field(..., description="1-based position in stages list (1 = first step, 2 = second step, …).")
+    title: str = Field(..., description="Display label (step_name or step_id)")
+    assignee: str = Field(..., description="Assignee")
+    role: str = Field(..., description="Role")
+    due_date: str = Field(default="", description="Due Date")
+    start_date: str = Field(..., description="MM/DD/YYYY HH:MM:SS AM/PM")
+    completed_date: str = Field(default="", description="MM/DD/YYYY HH:MM:SS AM/PM")
+    status: str = Field(..., description="yet_to_start, in_progress, completed, retry, skipped, rejected")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReportTrackerStatusLiteResponse(BaseModel):
+    """
+    Response schema for status_lite API.
+    report_id + stages (array of StageLite); snake_case.
+    """
+    report_id: str
+    stages: List[StageLite]
 
     model_config = ConfigDict(from_attributes=True)
 

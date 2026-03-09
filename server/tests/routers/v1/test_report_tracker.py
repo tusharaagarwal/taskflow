@@ -1006,6 +1006,181 @@ class TestExcludeAssembler:
         assert first.get("step_name") == "Assemble Draft"
 
 
+class TestStatusLite:
+    """Tests for GET /report-tracker/{report_id}/status_lite."""
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_success(self, client, sample_report_tracker):
+        """status_lite returns 200 with report_id and stages; id is 1-based, dates and status normalized."""
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/status_lite")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
+        assert "stages" in data
+        stages = data["stages"]
+        assert isinstance(stages, list)
+        assert len(stages) >= 1
+        first = stages[0]
+        assert first["id"] == 1
+        assert isinstance(first["id"], int)
+        assert "title" in first
+        assert first["title"] in ("Initial Draft", "—") or first["title"]
+        assert "assignee" in first
+        assert first["assignee"] in ("Unassigned",) or isinstance(first["assignee"], str)
+        assert "role" in first
+        assert first["due_date"] == ""
+        assert "start_date" in first
+        assert first["status"] in ("yet_to_start", "in_progress", "completed", "retry", "skipped", "rejected", "")
+        assert "completed_date" in first
+        assert isinstance(first["completed_date"], str), "completed_date must be string (empty if not completed)"
+        for stage in stages:
+            assert isinstance(stage["completed_date"], str)
+            if stage.get("status") != "completed":
+                assert stage["completed_date"] == "", "uncompleted stage must have completed_date empty string"
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_not_found(self, client, db):
+        """status_lite returns 404 for unknown report_id."""
+        response = await client.get("/report-tracker/nonexistent-report-id/status_lite")
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        data = response.json()
+        assert "detail" in data
+        assert "not found" in data["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_snake_case(self, client, sample_report_tracker):
+        """status_lite response uses snake_case (due_date, start_date, completed_date)."""
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/status_lite")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "stages" in data
+        if data["stages"]:
+            stage = data["stages"][0]
+            assert "due_date" in stage
+            assert "start_date" in stage
+            assert "completed_date" in stage
+            assert "completedDate" not in stage
+            assert "startDate" not in stage
+            assert "dueDate" not in stage
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_unassigned(self, client, db_with_content_products):
+        """Step with no assignees yields assignee 'Unassigned' and role 'N/A'."""
+        workflow_steps = ReportTrackerCreateRequest.create_workflow_steps_json(SAMPLE_WORKFLOW)
+        tracker = ReportTracker(
+            report_id="PR-lite-unassigned",
+            workflow_json=SAMPLE_WORKFLOW,
+            workflow_steps_json=workflow_steps,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_with_content_products.add(tracker)
+        await db_with_content_products.commit()
+        await db_with_content_products.refresh(tracker)
+        response = await client.get(f"/report-tracker/{tracker.report_id}/status_lite")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        stages = data["stages"]
+        assert len(stages) >= 1
+        first = stages[0]
+        assert first["assignee"] == "Unassigned"
+        assert first["role"] == "N/A"
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_status_mapping(self, client, db_with_content_products):
+        """status_lite returns raw status from GET /status with no mapping (pass-through)."""
+        pt = [
+            {
+                "instance_id": "i1",
+                "step_id": "s1",
+                "step_name": "Step 1",
+                "actor": {},
+                "app_data": {"assignee": []},
+                "started_at": "2025-03-01T09:00:00Z",
+                "completed_at": "2025-03-05T16:30:00Z",
+                "status": "completed",
+            },
+            {
+                "instance_id": "i2",
+                "step_id": "s2",
+                "step_name": "Step 2",
+                "actor": {},
+                "app_data": {"assignee": []},
+                "started_at": "2025-03-05T17:00:00Z",
+                "completed_at": None,
+                "status": "in_progress",
+            },
+            {
+                "instance_id": "i3",
+                "step_id": "s3",
+                "step_name": "Step 3",
+                "actor": {},
+                "app_data": {"assignee": []},
+                "started_at": None,
+                "completed_at": None,
+                "status": "yet_to_start",
+            },
+            {
+                "instance_id": "i4",
+                "step_id": "s4",
+                "step_name": "Step 4",
+                "actor": {},
+                "app_data": {"assignee": []},
+                "started_at": None,
+                "completed_at": None,
+                "status": "retry",
+            },
+        ]
+        tracker = ReportTracker(
+            report_id="PR-lite-status-map",
+            workflow_json={},
+            workflow_steps_json={"progress_tracker": pt},
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_with_content_products.add(tracker)
+        await db_with_content_products.commit()
+        await db_with_content_products.refresh(tracker)
+        response = await client.get(f"/report-tracker/{tracker.report_id}/status_lite")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        stages = {s["id"]: s for s in data["stages"]}
+        assert stages[1]["status"] == "completed"
+        assert stages[2]["status"] == "in_progress"
+        assert stages[3]["status"] == "yet_to_start"
+        assert stages[4]["status"] == "retry"
+
+    @pytest.mark.asyncio
+    async def test_get_report_status_lite_exclude_assembler(self, client, db, mock_cpm_and_workflow):
+        """GET status_lite?exclude_assembler=true returns stages starting from first human step."""
+        await _create_test_content_products(db)
+        with patch.object(WorkflowService, "get_workflow_json_from_workflow", new_callable=AsyncMock) as mock_wf:
+            mock_wf.return_value = SAMPLE_WORKFLOW_WITH_ASSEMBLER
+            create_payload = {
+                "transaction_id": "TXN-lite-excl",
+                "pr_id": "PR-lite-excl",
+                "content_type": "Credit Opinion",
+                "lob": DEFAULT_LOB,
+                "sub_lob": DEFAULT_SUB_LOB,
+                "document_type": "Credit Opinion",
+                "action_code": "APPROVED",
+            }
+            create_response = await client.post("/report-tracker/", json=create_payload)
+        assert create_response.status_code == status.HTTP_201_CREATED
+        report_id = create_response.json()["report_id"]
+        response = await client.get(f"/report-tracker/{report_id}/status_lite?exclude_assembler=true")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == report_id
+        stages = data["stages"]
+        assert len(stages) >= 1
+        first = stages[0]
+        assert first["title"] == "Initial Draft"
+        assert first["id"] == 1
+        titles = [s["title"] for s in stages]
+        assert "Assemble Draft" not in titles
+
+
 class TestPathResolution:
     """Tests for dynamic transition path resolution functionality."""
     

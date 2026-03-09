@@ -4,7 +4,8 @@ from typing import List
 
 from app.db.database import get_db
 from app.schemas.report_tracker import (
-    ReportTrackerStatusResponse, 
+    ReportTrackerStatusResponse,
+    ReportTrackerStatusLiteResponse,
     ReportTrackerResponse, 
     ReportTrackerCreateRequest, 
     ReportTrackerListResponse,
@@ -154,6 +155,8 @@ async def update_report_tracker(
     **Validation:**
     - At least one of 'action' or 'app_data' must be provided
     - If instance_id provided, step must exist in progress tracker
+
+    **Assignee in status_lite:** To show assignee on the in-progress step, use app_data only (no action) for the current step, or instance_id + app_data (no action) for any step; status_lite will reflect it when that step is current.
     """
     try:
         tracker = await ReportTrackerService.update(db, report_id, update_data)
@@ -164,7 +167,7 @@ async def update_report_tracker(
                 detail=f"Report tracker with report_id '{report_id}' not found"
             )
 
-        # Notify consumer applications (orchestrator-to-authoring) on any workflow update
+        # Notify consumer applications (orchestrator-to-workspace) on any workflow update
         import logging
         from app.services.aws.messaging_service import get_messaging_service
         from app.config.config import settings
@@ -246,6 +249,33 @@ async def get_status_exclude_first_assembler_step(
     excluding the leading agent assembler step. Same response shape as GET /{report_id}/status.
     """
     status_data = await ReportTrackerService.get_status_exclude_first_assembler_step(db, report_id)
+    if not status_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report tracker with report_id '{report_id}' not found"
+        )
+    return status_data
+
+
+@router.get("/{report_id}/status_lite", response_model=ReportTrackerStatusLiteResponse)
+async def get_report_status_lite(
+    report_id: str,
+    exclude_assembler: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get report status in lite format: report_id and stages array only.
+
+    **Response:** report_id (string), stages (array of stage objects with snake_case fields):
+    id (1-based int), title, assignee, role, due_date, start_date, completed_date, status.
+    Dates in MM/DD/YYYY HH:MM:SS AM/PM; start_date empty string if not started;
+    completed_date empty string if not completed. status is the same as GET /status (e.g. yet_to_start, in_progress, completed, retry, skipped, rejected), or empty string if missing.
+
+    **Query Parameters:**
+    - exclude_assembler (bool, default: false): If true, stages start from the first human step,
+      excluding the leading agent assembler step.
+    """
+    status_data = await ReportTrackerService.get_status_lite(db, report_id, exclude_assembler=exclude_assembler)
     if not status_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

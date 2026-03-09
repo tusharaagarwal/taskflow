@@ -79,7 +79,7 @@ def _notify_consumers(
     if transaction_id is not None:
         message["transaction_id"] = transaction_id
 
-    topic_name = getattr(settings, "consumer_notification_topic_name", "orchestrator-to-authoring")
+    topic_name = getattr(settings, "consumer_notification_topic_name", "orchestrator-to-workspace")
     message_group_id = getattr(
         settings, "consumer_notification_message_group_id", "consumer-notification-group-1"
     )
