@@ -419,3 +419,214 @@ class TestReportTrackerServiceAdditional:
             assert progress[0].get("app_data", {}).get("assignee")
             assert len(progress[0]["app_data"]["assignee"]) == 1
             assert progress[0]["app_data"]["assignee"][0]["user_id"] == "u1"
+
+    def test_reject_finds_completed_step_index_tier4(self, service):
+        """_reject with completed last step (e.g. Published) finds index via Tier 4 and runs rejection flow."""
+        from unittest.mock import MagicMock
+        workflow_json = {
+            "steps": [
+                {
+                    "step_id": "published",
+                    "step_name": "Published",
+                    "stage_name": "Published",
+                    "transitions": {
+                        "fail_goto": {"default": "NA", "unpublish": "unpublish_in_progress"}
+                    },
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "unpublish_in_progress",
+                    "step_name": "Un-Publish",
+                    "stage_name": "Un-Publish",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+            ]
+        }
+        steps = [
+            {"step_id": "prev", "status": "completed", "instance_id": "i1"},
+            {"step_id": "published", "status": "completed", "instance_id": "i2"},
+        ]
+        current_step = steps[1]
+        current_step_json = workflow_json["steps"][0]
+        tracker = MagicMock()
+        ReportTrackerService._reject(
+            tracker, steps, current_step, current_step_json, workflow_json, path="unpublish"
+        )
+        assert steps[1]["status"] == "rejected"
+        assert len(steps) == 3
+        assert steps[2]["step_id"] == "unpublish_in_progress"
+        assert steps[2]["status"] == "in_progress"
+
+    @pytest.mark.asyncio
+    async def test_update_reject_with_path_on_last_completed_step(self, mock_db):
+        """update() with action=reject and path targets last completed step when no in_progress step."""
+        from app.schemas.report_tracker import ReportTrackerUpdateRequest
+        from app.models.report_tracker import ReportTracker
+        from unittest.mock import MagicMock
+
+        workflow_json = {
+            "steps": [
+                {
+                    "step_id": "published",
+                    "step_name": "Published",
+                    "stage_name": "Published",
+                    "transitions": {
+                        "fail_goto": {"default": "NA", "unpublish": "unpublish_in_progress"}
+                    },
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "unpublish_in_progress",
+                    "step_name": "Un-Publish",
+                    "stage_name": "Un-Publish",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+            ]
+        }
+        progress = [
+            {"step_id": "prev", "status": "completed", "instance_id": "i1"},
+            {"step_id": "published", "status": "completed", "instance_id": "i2"},
+        ]
+        mock_tracker = MagicMock(spec=ReportTracker)
+        mock_tracker.workflow_steps_json = {"progress_tracker": progress}
+        mock_tracker.workflow_json = workflow_json
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        with patch("app.services.report_tracker_service.flag_modified"):
+            with patch.object(
+                ReportTrackerService,
+                "get_by_report_id",
+                new_callable=AsyncMock,
+                return_value=mock_tracker,
+            ):
+                update_data = ReportTrackerUpdateRequest(
+                    action="reject",
+                    path="unpublish",
+                )
+                result = await ReportTrackerService.update(
+                    mock_db, "R-1", update_data
+                )
+        assert result is mock_tracker
+        assert progress[1]["status"] == "rejected"
+        assert len(progress) == 3
+        assert progress[2]["step_id"] == "unpublish_in_progress"
+
+    def test_accept_inserts_missing_next_step_when_path_resolves_to_step_not_in_tracker(
+        self, service
+    ):
+        """_accept with path that resolves to a step not in tracker inserts it and activates."""
+        from unittest.mock import MagicMock
+        workflow_json = {
+            "steps": [
+                {
+                    "step_id": "A",
+                    "step_name": "Step A",
+                    "stage_name": "Review",
+                    "transitions": {
+                        "success_goto": {"default": "C", "branch": "B"}
+                    },
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "B",
+                    "step_name": "Step B",
+                    "stage_name": "Review",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "C",
+                    "step_name": "Step C",
+                    "stage_name": "Review",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA"},
+            {"step_id": "C", "status": "yet_to_start", "instance_id": "iC"},
+        ]
+        current_step = steps[0]
+        current_step_json = workflow_json["steps"][0]
+        tracker = MagicMock()
+        ReportTrackerService._accept(
+            tracker, steps, current_step, current_step_json, workflow_json, path="branch"
+        )
+        assert steps[0]["status"] == "completed"
+        assert len(steps) == 3
+        assert steps[1]["step_id"] == "B"
+        assert steps[1]["status"] == "in_progress"
+        assert steps[2]["step_id"] == "C"
+
+    def test_accept_duplicate_check_uses_existing_step_when_next_step_already_in_tracker(
+        self, service
+    ):
+        """_accept when resolved next step already exists later in tracker: no insert, use existing."""
+        from unittest.mock import MagicMock
+        workflow_json = {
+            "steps": [
+                {
+                    "step_id": "A",
+                    "step_name": "Step A",
+                    "stage_name": "Review",
+                    "transitions": {
+                        "success_goto": {"default": "C", "branch": "B"}
+                    },
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "B",
+                    "step_name": "Step B",
+                    "stage_name": "Review",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+                {
+                    "step_id": "C",
+                    "step_name": "Step C",
+                    "stage_name": "Review",
+                    "transitions": {"success_goto": "NA"},
+                    "actor": {},
+                    "is_optional": False,
+                    "sla": {},
+                },
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA"},
+            {"step_id": "B", "status": "yet_to_start", "instance_id": "iB"},
+            {"step_id": "C", "status": "yet_to_start", "instance_id": "iC"},
+        ]
+        current_step = steps[0]
+        current_step_json = workflow_json["steps"][0]
+        tracker = MagicMock()
+        initial_len = len(steps)
+        ReportTrackerService._accept(
+            tracker, steps, current_step, current_step_json, workflow_json, path="branch"
+        )
+        assert len(steps) == initial_len
+        assert sum(1 for s in steps if s.get("step_id") == "B") == 1
+        assert steps[1]["step_id"] == "B"
+        assert steps[1]["status"] == "in_progress"
+        assert steps[0]["status"] == "completed"
