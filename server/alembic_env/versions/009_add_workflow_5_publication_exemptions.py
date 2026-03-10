@@ -8,6 +8,7 @@ Inserts new workflow row (workflow_id=5) with Publication Workflow with Exemptio
 All existing data (workflow 3, 4, etc.) remains unchanged.
 """
 from alembic import op
+from sqlalchemy import text
 
 revision = "009"
 down_revision = "008"
@@ -18,13 +19,18 @@ WORKFLOW_JSON = r'{"id":"workflow_002","workflow_name":"Publication Workflow (Ex
 
 
 def upgrade():
-    escaped_json = WORKFLOW_JSON.replace("'", "''")
-    op.execute(
-        f"""
-        INSERT INTO public.workflow (workflow_id, workflow_json, name)
-        SELECT 5, '{escaped_json}', 'Publication Workflow with Exemptions'
-        WHERE NOT EXISTS (SELECT 1 FROM public.workflow WHERE workflow_id = 5);
-        """
+    conn = op.get_bind()
+    conn.execute(
+        text("""
+            INSERT INTO public.workflow (workflow_id, workflow_json, name)
+            SELECT :workflow_id, :workflow_json, :name
+            WHERE NOT EXISTS (SELECT 1 FROM public.workflow WHERE workflow_id = :workflow_id)
+        """),
+        {
+            "workflow_id": 5,
+            "workflow_json": WORKFLOW_JSON,
+            "name": "Publication Workflow with Exemptions",
+        },
     )
 
 

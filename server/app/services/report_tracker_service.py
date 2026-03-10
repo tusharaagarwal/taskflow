@@ -661,7 +661,26 @@ class ReportTrackerService:
             if steps[i].get("step_id") == success_goto:
                 next_step_index = i
                 break
-        
+
+        if next_step_index is None:
+            next_step_json = ReportTrackerService._find_step_in_workflow_json(
+                workflow_json, success_goto
+            )
+            if next_step_json is None:
+                raise UnprocessableEntityException(
+                    detail=f"Next step {success_goto} not found in progress tracker"
+                )
+            for i in range(current_step_index + 1, len(steps)):
+                if steps[i].get("step_id") == success_goto:
+                    next_step_index = i
+                    break
+            if next_step_index is None:
+                new_step = ReportTrackerService._create_step_object(
+                    next_step_json, status="yet_to_start"
+                )
+                steps.insert(current_step_index + 1, new_step)
+                next_step_index = current_step_index + 1
+
         if next_step_index is not None:
             for idx in range(current_step_index + 1, next_step_index):
                 skipped_step = steps[idx]
@@ -828,6 +847,14 @@ class ReportTrackerService:
                     current_step_index = i
                     break
         
+        # Tier 4: Last resort - completed step (e.g. auto-completed Published for reject+path)
+        if current_step_index is None:
+            for i in range(len(steps) - 1, -1, -1):
+                if (steps[i].get("step_id") == current_step_id and
+                        steps[i].get("status") == "completed"):
+                    current_step_index = i
+                    break
+        
         if current_step_index is None:
             raise UnprocessableEntityException(
                 detail=f"Current step {current_step_id} not found in progress tracker"
@@ -987,7 +1014,25 @@ class ReportTrackerService:
                     raise UnprocessableEntityException(detail="No workflow steps found")
 
             if not target_step:
-                raise UnprocessableEntityException(detail="No step in progress or retry state found")
+                # Backward action + path: allow last completed step as target (e.g. Published → unpublish/republish)
+                if WorkflowActionType.is_backward_action(action) and transition_path:
+                    last_step = steps[-1] if steps else None
+                    if last_step and last_step.get("status") == "completed":
+                        last_step_json = ReportTrackerService._find_step_in_workflow_json(
+                            workflow_json, last_step.get("step_id")
+                        )
+                        fail_goto_raw = (last_step_json or {}).get("transitions", {}).get("fail_goto")
+                        if fail_goto_raw and fail_goto_raw != "NA":
+                            try:
+                                resolved = ReportTrackerService._resolve_transition_path(
+                                    fail_goto_raw, transition_path, "fail_goto"
+                                )
+                                if resolved and resolved != "NA":
+                                    target_step = last_step
+                            except UnprocessableEntityException:
+                                pass
+                if not target_step:
+                    raise UnprocessableEntityException(detail="No step in progress or retry state found")
 
         # If only app_data is provided (no action), we still need a target step
         if not action and app_data is not None:
