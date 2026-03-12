@@ -238,7 +238,9 @@ class MessagingService:
         {
             "message_id": "msg_<timestamp>",
             "timestamp": "<ISO8601>",
-            "type": "<event_type>",
+            "type": "orchestrator",
+            "queue_name": "orchestrator_to_workspace",
+            "event_type": "<event_type>",
             "report_id": "<report_id>",
             "pr_id": "<pr_id>",           // when provided
             "transaction_id": "<transaction_id>",  // when provided
@@ -272,7 +274,9 @@ class MessagingService:
         message: Dict[str, Any] = {
             "message_id": f"msg_{timestamp}",
             "timestamp": timestamp,
-            "type": event_type,
+            "type": "orchestrator",
+            "queue_name": "orchestrator_to_workspace",
+            "event_type": event_type,
             "report_id": report_id,
             "status": status
         }

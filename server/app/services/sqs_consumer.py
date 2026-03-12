@@ -70,7 +70,9 @@ def _notify_consumers(
     message: Dict[str, Any] = {
         "message_id": f"msg_{timestamp}",
         "timestamp": timestamp,
-        "type": event_type,
+        "type": "orchestrator",
+        "queue_name": "orchestrator_to_workspace",
+        "event_type": event_type,
         "report_id": report_id,
         "status": status,
     }

@@ -60,7 +60,7 @@ def _extract_payload(body_json: Any) -> Dict[str, Any]:
 def _handle_consumer_notification(payload: Dict[str, Any], message_id: str) -> bool:
     """Log the notification payload and return True so the message is deleted."""
     report_id = payload.get("report_id", "")
-    event_type = payload.get("type", "")
+    event_type = payload.get("event_type") or payload.get("type", "")
     status = payload.get("status", "")
     pr_id = payload.get("pr_id", "")
     transaction_id = payload.get("transaction_id", "")

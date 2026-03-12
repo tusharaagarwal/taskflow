@@ -57,7 +57,9 @@ def test_notify_consumers_success_publish_to_sns(mock_publisher):
     call_kw = mock_publisher.publish_to_sns.call_args[1]
     assert call_kw["topic_name"] == "consumer-topic"
     assert call_kw["message"]["report_id"] == "R-2"
-    assert call_kw["message"]["type"] == "report_published"
+    assert call_kw["message"]["type"] == "orchestrator"
+    assert call_kw["message"]["queue_name"] == "orchestrator_to_workspace"
+    assert call_kw["message"]["event_type"] == "report_published"
     assert call_kw["message"]["data"] == {"key": "value"}
 
 
