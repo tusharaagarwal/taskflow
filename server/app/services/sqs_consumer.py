@@ -2,7 +2,7 @@
 Assembler completion SQS consumer (in-process).
 
 Consumes messages from the assembler-to-orchestrator queue, updates report tracker
-via HTTP PUT, and notifies consumers via SNS. All logic is self-contained; no
+in-process (no HTTP), and notifies consumers via SNS. All logic is self-contained; no
 imports from app.services.aws.listeners or app.services.aws.consumer.
 """
 import asyncio
@@ -13,10 +13,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
-import httpx
 from botocore.exceptions import ClientError
 
 from app.config.config import settings
+from app.db.database import AsyncSessionLocal
+from app.exceptions import UnprocessableEntityException
+from app.schemas.report_tracker import ReportTrackerUpdateRequest
+from app.services.report_tracker_service import ReportTrackerService
 
 logger = logging.getLogger(__name__)
 
@@ -154,10 +157,10 @@ def _notify_consumers(
         logger.error("Failed to publish consumer notification to SNS: %s", e)
 
 
-def _handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> bool:
+async def _handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> bool:
     """
     Handle draft completion notification. Validate report_id; on status=completed
-    PUT report-tracker and notify consumers. All logic inline; no aws/listeners.
+    update report-tracker in-process and notify consumers. No HTTP or base URL.
 
     Expected payload: report_id (or reportId), status, optional pr_id, transaction_id,
     step_name, content_type, completed_date. See MESSAGING_CLEANUP_LOG.md.
@@ -188,36 +191,27 @@ def _handle_assembler_completion(payload: Dict[str, Any], message_id: str) -> bo
             return False
 
         if status == "completed":
-            base_url = (getattr(settings, "orchestrator_api_base_url", None) or "").rstrip("/")
-            if not base_url:
-                logger.error("ORCHESTRATOR_API_BASE_URL is not configured")
-                return False
-            url = f"{base_url}/v1/report-tracker/{report_id}"
-            logger.debug("Processing completed status; url=%s", url)
-            body: Dict[str, Any] = {"action": "accept"}
+            update_data = ReportTrackerUpdateRequest(action="accept")
             try:
-                with httpx.Client(timeout=30.0) as client:
-                    response = client.put(url, json=body)
-            except httpx.HTTPError as e:
+                async with AsyncSessionLocal() as db:
+                    tracker = await ReportTrackerService.update(db, report_id, update_data)
+            except (ValueError, UnprocessableEntityException) as e:
                 logger.error(
-                    "HTTP error calling report-tracker API for report_id %s: %s",
+                    "Report-tracker update failed for report_id %s: %s",
                     report_id,
                     str(e),
                 )
                 return False
-            if response.status_code < 200 or response.status_code >= 300:
+            if not tracker:
                 logger.error(
-                    "Report-tracker API returned %s for report_id %s: %s",
-                    response.status_code,
+                    "Report-tracker not found for report_id %s",
                     report_id,
-                    response.text[:500] if response.text else "",
                 )
                 return False
 
             logger.info(
-                "Report-tracker PUT succeeded; report_id=%s, status_code=%s",
+                "Report-tracker update succeeded in-process; report_id=%s",
                 report_id,
-                response.status_code,
             )
             logger.debug("Calling _notify_consumers for report_id=%s", report_id)
             _notify_consumers(
@@ -357,7 +351,7 @@ class AssemblerCompletionSQSConsumer:
                 message_id,
                 list(payload.keys()),
             )
-            success = _handle_assembler_completion(payload, message_id)
+            success = await _handle_assembler_completion(payload, message_id)
             logger.debug(
                 "Handler result; queue_name=%s, message_id=%s, success=%s",
                 self.queue_name,
