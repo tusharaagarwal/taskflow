@@ -364,6 +364,13 @@ class AssemblerCompletionSQSConsumer:
                 message_id,
                 success,
             )
+            if not success:
+                logger.warning(
+                    "Message processing failed (handler returned False); queue_name=%s, message_id=%s, payload_keys=%s",
+                    self.queue_name,
+                    message_id,
+                    list(payload.keys()),
+                )
 
             if success:
                 logger.debug(
@@ -449,7 +456,12 @@ class AssemblerCompletionSQSConsumer:
                     [m.get("MessageId") for m in messages],
                 )
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                failed = sum(1 for r in results if r is False or isinstance(r, Exception))
+                failed_pairs = [
+                    (messages[i].get("MessageId", "unknown"), results[i])
+                    for i in range(len(results))
+                    if results[i] is False or isinstance(results[i], Exception)
+                ]
+                failed = len(failed_pairs)
                 logger.debug(
                     "Batch processed; queue_name=%s, total=%s, success=%s, failed=%s",
                     self.queue_name,
@@ -458,12 +470,27 @@ class AssemblerCompletionSQSConsumer:
                     failed,
                 )
                 if failed > 0:
+                    failed_ids = [mid for mid, _ in failed_pairs]
                     logger.warning(
-                        "Failed to process %d out of %d messages; queue_name=%s",
+                        "Failed to process %d out of %d messages; queue_name=%s; failed_message_ids=%s",
                         failed,
                         len(messages),
                         self.queue_name,
+                        failed_ids,
                     )
+                    for msg_id, result in failed_pairs:
+                        if isinstance(result, Exception):
+                            logger.error(
+                                "Exception while processing message_id=%s; queue_name=%s: %s",
+                                msg_id,
+                                self.queue_name,
+                                result,
+                                exc_info=(
+                                    type(result),
+                                    result,
+                                    getattr(result, "__traceback__", None),
+                                ),
+                            )
 
             except ClientError as e:
                 logger.error(
