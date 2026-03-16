@@ -630,3 +630,459 @@ class TestReportTrackerServiceAdditional:
         assert steps[1]["step_id"] == "B"
         assert steps[1]["status"] == "in_progress"
         assert steps[0]["status"] == "completed"
+
+
+class TestIsAssigneeActive:
+    """Tests for _is_assignee_active helper."""
+
+    def test_active_status(self):
+        assert ReportTrackerService._is_assignee_active({"status": "active"}) is True
+
+    def test_inactive_status(self):
+        assert ReportTrackerService._is_assignee_active({"status": "inactive"}) is False
+
+    def test_no_status_key_v1_legacy(self):
+        assert ReportTrackerService._is_assignee_active({"user_id": "u1"}) is True
+
+    def test_non_dict(self):
+        assert ReportTrackerService._is_assignee_active("not-a-dict") is False
+
+    def test_none_value(self):
+        assert ReportTrackerService._is_assignee_active(None) is False
+
+
+class TestAssignUserToStepV2:
+    """Tests for assign_user_to_step_v2 service method."""
+
+    @pytest.fixture
+    def mock_db(self):
+        return AsyncMock()
+
+    def _make_tracker(self, progress_tracker):
+        tracker = MagicMock()
+        tracker.report_id = "R-1"
+        tracker.workflow_steps_json = {"progress_tracker": progress_tracker}
+        return tracker
+
+    def _make_step(self, instance_id, step_status="yet_to_start"):
+        return {
+            "instance_id": instance_id,
+            "step_id": "draft",
+            "step_name": "Initial Draft",
+            "stage_name": "Authoring",
+            "status": step_status,
+            "app_data": {"assignee": []},
+        }
+
+    async def _do_assign(self, mock_db, tracker, instance_id, **overrides):
+        defaults = dict(
+            user_id="u1", user_name="User One",
+            user_email="u1@example.com", role="Lead Author",
+        )
+        defaults.update(overrides)
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        with patch(
+            "app.services.report_tracker_service.flag_modified",
+        ), patch.object(
+            ReportTrackerService, "get_by_report_id",
+            new_callable=AsyncMock, return_value=tracker,
+        ):
+            return await ReportTrackerService.assign_user_to_step_v2(
+                db=mock_db, report_id="R-1", instance_id=instance_id, **defaults,
+            )
+
+    @pytest.mark.asyncio
+    async def test_v2_returns_none_tracker_not_found(self, mock_db):
+        with patch.object(
+            ReportTrackerService, "get_by_report_id",
+            new_callable=AsyncMock, return_value=None,
+        ):
+            result = await ReportTrackerService.assign_user_to_step_v2(
+                db=mock_db, report_id="nope", instance_id="x",
+                user_id="u1", user_name="User", user_email="u@e.com", role="R",
+            )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_v2_raises_instance_id_not_found(self, mock_db):
+        from app.exceptions import UnprocessableEntityException
+        tracker = self._make_tracker([self._make_step("id-1")])
+        with pytest.raises(UnprocessableEntityException):
+            await self._do_assign(mock_db, tracker, instance_id="nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_v2_raises_progress_tracker_empty(self, mock_db):
+        from app.exceptions import UnprocessableEntityException
+        tracker = self._make_tracker([])
+        with pytest.raises(UnprocessableEntityException):
+            await self._do_assign(mock_db, tracker, instance_id="x")
+
+    @pytest.mark.asyncio
+    async def test_v2_first_assignment_has_9_keys(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assignees = step["app_data"]["assignee"]
+        assert len(assignees) == 1
+        expected_keys = {
+            "user_id", "user_name", "user_email", "role",
+            "status", "assigned_at", "started_at", "completed_at", "unassigned_at",
+        }
+        assert set(assignees[0].keys()) == expected_keys
+
+    @pytest.mark.asyncio
+    async def test_v2_status_is_active(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_v2_assigned_at_is_utc_iso(self, mock_db):
+        from datetime import datetime, timezone
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        ts = step["app_data"]["assignee"][0]["assigned_at"]
+        parsed = datetime.fromisoformat(ts)
+        assert parsed.tzinfo is not None
+
+    @pytest.mark.asyncio
+    async def test_v2_started_at_null_on_yet_to_start(self, mock_db):
+        step = self._make_step("id-1", step_status="yet_to_start")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["started_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_v2_started_at_set_on_in_progress_step(self, mock_db):
+        step = self._make_step("id-1", step_status="in_progress")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["started_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_v2_started_at_set_on_retry_step(self, mock_db):
+        step = self._make_step("id-1", step_status="retry")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["started_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_v2_completed_at_null_on_new(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["completed_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_v2_unassigned_at_null_on_new(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["unassigned_at"] is None
+
+    @pytest.mark.asyncio
+    async def test_v2_deactivates_existing_active(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = [
+            {"user_id": "old", "user_name": "Old", "status": "active", "started_at": None,
+             "completed_at": None, "unassigned_at": None}
+        ]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        old = step["app_data"]["assignee"][0]
+        assert old["status"] == "inactive"
+        assert old["unassigned_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_v2_deactivates_multiple_active(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = [
+            {"user_id": "a", "status": "active"},
+            {"user_id": "b", "status": "active"},
+        ]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert step["app_data"]["assignee"][0]["status"] == "inactive"
+        assert step["app_data"]["assignee"][1]["status"] == "inactive"
+        assert step["app_data"]["assignee"][2]["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_v2_inactive_untouched(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = [
+            {"user_id": "old", "status": "inactive", "unassigned_at": "2026-01-01T00:00:00+00:00"}
+        ]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        old = step["app_data"]["assignee"][0]
+        assert old["unassigned_at"] == "2026-01-01T00:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_v2_same_person_reassign(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = [
+            {"user_id": "u1", "user_name": "User One", "status": "active",
+             "assigned_at": "2026-01-01", "started_at": None,
+             "completed_at": None, "unassigned_at": None}
+        ]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="u1")
+        assert len(step["app_data"]["assignee"]) == 2
+        assert step["app_data"]["assignee"][0]["status"] == "inactive"
+        assert step["app_data"]["assignee"][1]["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_v2_different_person_reassign(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = [
+            {"user_id": "u1", "status": "active"}
+        ]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="u2")
+        assert step["app_data"]["assignee"][0]["status"] == "inactive"
+        assert step["app_data"]["assignee"][1]["user_id"] == "u2"
+        assert step["app_data"]["assignee"][1]["status"] == "active"
+
+    @pytest.mark.asyncio
+    async def test_v2_history_order_chronological(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="u1")
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="u2")
+        ids = [a["user_id"] for a in step["app_data"]["assignee"]]
+        assert ids == ["u1", "u2"]
+
+    @pytest.mark.asyncio
+    async def test_v2_triple_reassign_chain(self, mock_db):
+        step = self._make_step("id-1")
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="A")
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="B")
+        await self._do_assign(mock_db, tracker, instance_id="id-1", user_id="C")
+        statuses = [a["status"] for a in step["app_data"]["assignee"]]
+        assert statuses == ["inactive", "inactive", "active"]
+
+    @pytest.mark.asyncio
+    async def test_v2_assigns_to_yet_to_start_step(self, mock_db):
+        step = self._make_step("id-1", "yet_to_start")
+        tracker = self._make_tracker([step])
+        result = await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert result is tracker
+
+    @pytest.mark.asyncio
+    async def test_v2_assigns_to_in_progress_step(self, mock_db):
+        step = self._make_step("id-1", "in_progress")
+        tracker = self._make_tracker([step])
+        result = await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert result is tracker
+
+    @pytest.mark.asyncio
+    async def test_v2_assigns_to_completed_step(self, mock_db):
+        step = self._make_step("id-1", "completed")
+        tracker = self._make_tracker([step])
+        result = await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert result is tracker
+
+    @pytest.mark.asyncio
+    async def test_v2_assigns_to_retry_step(self, mock_db):
+        step = self._make_step("id-1", "retry")
+        tracker = self._make_tracker([step])
+        result = await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert result is tracker
+
+    @pytest.mark.asyncio
+    async def test_v2_handles_missing_app_data(self, mock_db):
+        step = self._make_step("id-1")
+        del step["app_data"]
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert len(step["app_data"]["assignee"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_v2_handles_assignee_not_list(self, mock_db):
+        step = self._make_step("id-1")
+        step["app_data"]["assignee"] = "bad_value"
+        tracker = self._make_tracker([step])
+        await self._do_assign(mock_db, tracker, instance_id="id-1")
+        assert isinstance(step["app_data"]["assignee"], list)
+        assert len(step["app_data"]["assignee"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_v2_handles_missing_workflow_steps_json(self, mock_db):
+        from app.exceptions import UnprocessableEntityException
+        tracker = MagicMock()
+        tracker.report_id = "R-1"
+        tracker.workflow_steps_json = None
+        mock_db.commit = AsyncMock()
+        mock_db.refresh = AsyncMock()
+        with patch(
+            "app.services.report_tracker_service.flag_modified",
+        ), patch.object(
+            ReportTrackerService, "get_by_report_id",
+            new_callable=AsyncMock, return_value=tracker,
+        ):
+            with pytest.raises(UnprocessableEntityException):
+                await ReportTrackerService.assign_user_to_step_v2(
+                    db=mock_db, report_id="R-1", instance_id="id-1",
+                    user_id="u1", user_name="U", user_email="u@e.com", role="R",
+                )
+
+    @pytest.mark.asyncio
+    async def test_v2_assign_step_a_no_affect_step_b(self, mock_db):
+        step_a = self._make_step("id-a")
+        step_b = self._make_step("id-b")
+        step_b["app_data"]["assignee"] = [{"user_id": "existing", "status": "active"}]
+        tracker = self._make_tracker([step_a, step_b])
+        await self._do_assign(mock_db, tracker, instance_id="id-a")
+        assert len(step_b["app_data"]["assignee"]) == 1
+        assert step_b["app_data"]["assignee"][0]["user_id"] == "existing"
+        assert step_b["app_data"]["assignee"][0]["status"] == "active"
+
+
+class TestWorkflowEngineAssigneeTimestamps:
+    """Tests for assignee timestamp hooks in _accept/_reject."""
+
+    def test_accept_sets_completed_at_on_active_assignees(self):
+        workflow_json = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": "B"}, "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "NA"}, "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA",
+             "app_data": {"assignee": [
+                 {"user_id": "u1", "status": "active", "completed_at": None, "started_at": "t0"}
+             ]}},
+            {"step_id": "B", "status": "yet_to_start", "instance_id": "iB",
+             "app_data": {"assignee": []}},
+        ]
+        tracker = MagicMock()
+        ReportTrackerService._accept(
+            tracker, steps, steps[0], workflow_json["steps"][0], workflow_json
+        )
+        assert steps[0]["app_data"]["assignee"][0]["completed_at"] is not None
+
+    def test_accept_sets_started_at_on_next_step_assignees(self):
+        workflow_json = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": "B"}, "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "NA"}, "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA",
+             "app_data": {"assignee": [
+                 {"user_id": "u1", "status": "active", "completed_at": None, "started_at": "t0"}
+             ]}},
+            {"step_id": "B", "status": "yet_to_start", "instance_id": "iB",
+             "app_data": {"assignee": [
+                 {"user_id": "u2", "status": "active", "started_at": None, "completed_at": None}
+             ]}},
+        ]
+        tracker = MagicMock()
+        ReportTrackerService._accept(
+            tracker, steps, steps[0], workflow_json["steps"][0], workflow_json
+        )
+        assert steps[1]["app_data"]["assignee"][0]["started_at"] is not None
+
+    def test_accept_skips_inactive_assignees_for_completed_at(self):
+        workflow_json = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": "B"}, "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "NA"}, "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA",
+             "app_data": {"assignee": [
+                 {"user_id": "old", "status": "inactive", "completed_at": None,
+                  "unassigned_at": "2026-01-01T00:00:00+00:00"},
+                 {"user_id": "current", "status": "active", "completed_at": None, "started_at": "t0"},
+             ]}},
+            {"step_id": "B", "status": "yet_to_start", "instance_id": "iB",
+             "app_data": {"assignee": []}},
+        ]
+        tracker = MagicMock()
+        ReportTrackerService._accept(
+            tracker, steps, steps[0], workflow_json["steps"][0], workflow_json
+        )
+        assert steps[0]["app_data"]["assignee"][0]["completed_at"] is None
+        assert steps[0]["app_data"]["assignee"][1]["completed_at"] is not None
+
+    def test_reject_sets_completed_at_on_active_assignees(self):
+        workflow_json = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": "B", "fail_goto": "A"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "NA"}, "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            {"step_id": "A", "status": "in_progress", "instance_id": "iA",
+             "app_data": {"assignee": [
+                 {"user_id": "u1", "status": "active", "completed_at": None, "started_at": "t0"}
+             ]}},
+            {"step_id": "B", "status": "yet_to_start", "instance_id": "iB",
+             "app_data": {"assignee": []}},
+        ]
+        tracker = MagicMock()
+        ReportTrackerService._reject(
+            tracker, steps, steps[0], workflow_json["steps"][0], workflow_json
+        )
+        assert steps[0]["app_data"]["assignee"][0]["completed_at"] is not None
+
+
+class TestGetterHelpers:
+    """Tests for _first_active_assignee_name and _role_for_lite with v2 data."""
+
+    def test_first_active_assignee_name_returns_active(self):
+        step = {"app_data": {"assignee": [
+            {"user_name": "Alice", "status": "active"}
+        ]}}
+        assert ReportTrackerService._first_active_assignee_name(step) == "Alice"
+
+    def test_first_active_assignee_name_skips_inactive(self):
+        step = {"app_data": {"assignee": [
+            {"user_name": "Old", "status": "inactive"},
+            {"user_name": "New", "status": "active"},
+        ]}}
+        assert ReportTrackerService._first_active_assignee_name(step) == "New"
+
+    def test_first_active_assignee_name_mixed_list(self):
+        step = {"app_data": {"assignee": [
+            {"user_name": "X", "status": "inactive"},
+            {"user_name": "Y", "status": "inactive"},
+            {"user_name": "Z", "status": "active"},
+        ]}}
+        assert ReportTrackerService._first_active_assignee_name(step) == "Z"
+
+    def test_first_active_assignee_name_all_inactive(self):
+        step = {"app_data": {"assignee": [
+            {"user_name": "X", "status": "inactive"},
+        ]}}
+        assert ReportTrackerService._first_active_assignee_name(step) == "Unassigned"
+
+    def test_role_for_lite_returns_active_role(self):
+        step = {"app_data": {"assignee": [
+            {"role": "Lead Author", "status": "active"}
+        ]}}
+        assert ReportTrackerService._role_for_lite(step, "Alice") == "Lead Author"
+
+    def test_role_for_lite_skips_inactive(self):
+        step = {"app_data": {"assignee": [
+            {"role": "Old Role", "status": "inactive"},
+            {"role": "New Role", "status": "active"},
+        ]}}
+        assert ReportTrackerService._role_for_lite(step, "New") == "New Role"

@@ -480,3 +480,40 @@ class AssignUserToStepRequest(BaseModel):
             }
         }
     )
+
+
+class AssignUserToStepV2Request(BaseModel):
+    """
+    V2 request schema for assigning a user to a workflow step by instance_id.
+
+    Targets a step by its unique instance_id (no stage_name/step_name needed).
+    Replaces the current active assignee: deactivates the old record and appends
+    a new one with full lifecycle timestamps.
+
+    Attributes:
+        report_id: Unique identifier for the report
+        instance_id: UUID of the specific step instance in progress_tracker
+        user_id: Unique identifier for the user
+        user_name: Display name of the user
+        user_email: Email address of the user
+        role: Role/persona designation for this assignment
+    """
+    report_id: str = Field(..., description="Report ID")
+    instance_id: str = Field(..., description="UUID of the step instance in progress_tracker")
+    user_id: str = Field(..., description="User ID")
+    user_name: str = Field(..., description="User display name")
+    user_email: str = Field(..., description="User email address")
+    role: str = Field(..., description="Role/persona for this assignment (e.g. 'Lead Author')")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "report_id": "PR-123",
+                "instance_id": "550e8400-e29b-41d4-a716-446655440000",
+                "user_id": "user-123",
+                "user_name": "John Doe",
+                "user_email": "john.doe@example.com",
+                "role": "Lead Author"
+            }
+        }
+    )

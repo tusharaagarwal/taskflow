@@ -2232,3 +2232,156 @@ class TestFinalDraftUserStory:
             detail = " ".join(str(d) for d in detail)
         detail = str(detail).lower()
         assert "path" in detail or "invalid" in detail
+
+
+class TestAssignUserV2Route:
+    """Integration tests for POST /report-tracker/assign-user-v2 and v1 deprecation header."""
+
+    @pytest.mark.asyncio
+    async def test_v2_assign_success_200(self, client, sample_report_tracker):
+        progress = sample_report_tracker.workflow_steps_json["progress_tracker"]
+        target = next(s for s in progress if s["status"] == "in_progress")
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": target["instance_id"],
+            "user_id": "user-v2",
+            "user_name": "V2 User",
+            "user_email": "v2@example.com",
+            "role": "Lead Author",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
+
+    @pytest.mark.asyncio
+    async def test_v2_response_shape(self, client, sample_report_tracker):
+        progress = sample_report_tracker.workflow_steps_json["progress_tracker"]
+        target = next(s for s in progress if s["status"] == "in_progress")
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": target["instance_id"],
+            "user_id": "user-v2",
+            "user_name": "V2 User",
+            "user_email": "v2@example.com",
+            "role": "Lead Author",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        data = response.json()
+        assert "id" in data
+        assert "report_id" in data
+        assert "workflow_steps_json" in data
+        assert "created_at" in data
+        assert "updated_at" in data
+
+    @pytest.mark.asyncio
+    async def test_v2_assignee_has_9_keys(self, client, sample_report_tracker):
+        progress = sample_report_tracker.workflow_steps_json["progress_tracker"]
+        target = next(s for s in progress if s["status"] == "in_progress")
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": target["instance_id"],
+            "user_id": "user-v2",
+            "user_name": "V2 User",
+            "user_email": "v2@example.com",
+            "role": "Lead Author",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        data = response.json()
+        pt = data["workflow_steps_json"]["progress_tracker"]
+        step = next(s for s in pt if s["instance_id"] == target["instance_id"])
+        assignee = step["app_data"]["assignee"][-1]
+        expected_keys = {
+            "user_id", "user_name", "user_email", "role",
+            "status", "assigned_at", "started_at", "completed_at", "unassigned_at",
+        }
+        assert set(assignee.keys()) == expected_keys
+
+    @pytest.mark.asyncio
+    async def test_v2_not_found_404(self, client, db):
+        payload = {
+            "report_id": "nonexistent",
+            "instance_id": "doesnt-matter",
+            "user_id": "u1",
+            "user_name": "U",
+            "user_email": "u@e.com",
+            "role": "R",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert "not found" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_v2_invalid_instance_id_422(self, client, sample_report_tracker):
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": "invalid-uuid-that-does-not-exist",
+            "user_id": "u1",
+            "user_name": "U",
+            "user_email": "u@e.com",
+            "role": "R",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        assert response.status_code in (
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
+
+    @pytest.mark.asyncio
+    async def test_v2_missing_required_field_422(self, client, sample_report_tracker):
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": "some-id",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    @pytest.mark.asyncio
+    async def test_v2_reassign_deactivates_previous(self, client, sample_report_tracker):
+        progress = sample_report_tracker.workflow_steps_json["progress_tracker"]
+        target = next(s for s in progress if s["status"] == "in_progress")
+        base = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": target["instance_id"],
+            "user_email": "x@e.com",
+            "role": "Lead",
+        }
+        await client.post("/report-tracker/assign-user-v2", json={**base, "user_id": "A", "user_name": "A"})
+        response = await client.post("/report-tracker/assign-user-v2", json={**base, "user_id": "B", "user_name": "B"})
+        data = response.json()
+        pt = data["workflow_steps_json"]["progress_tracker"]
+        step = next(s for s in pt if s["instance_id"] == target["instance_id"])
+        assignees = step["app_data"]["assignee"]
+        assert len(assignees) >= 2
+        assert assignees[-2]["status"] == "inactive"
+        assert assignees[-1]["status"] == "active"
+        assert assignees[-1]["user_id"] == "B"
+
+    @pytest.mark.asyncio
+    async def test_v2_assign_to_yet_to_start_200(self, client, sample_report_tracker):
+        progress = sample_report_tracker.workflow_steps_json["progress_tracker"]
+        target = next(s for s in progress if s["status"] == "yet_to_start")
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "instance_id": target["instance_id"],
+            "user_id": "user-v2",
+            "user_name": "V2 User",
+            "user_email": "v2@example.com",
+            "role": "Reviewer",
+        }
+        response = await client.post("/report-tracker/assign-user-v2", json=payload)
+        assert response.status_code == status.HTTP_200_OK
+
+    @pytest.mark.asyncio
+    async def test_v1_deprecation_header_present(self, client, sample_report_tracker):
+        payload = {
+            "report_id": sample_report_tracker.report_id,
+            "stage_name": "Authoring",
+            "step_name": "Initial Draft",
+            "user_id": "user-1",
+            "user_name": "Jane",
+            "user_email": "j@e.com",
+            "role": "Analyst",
+        }
+        response = await client.post("/report-tracker/assign-user", json=payload)
+        assert response.headers.get("Deprecation") == "assign-user-v1"

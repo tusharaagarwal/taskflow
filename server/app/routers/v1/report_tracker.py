@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 
@@ -11,6 +11,7 @@ from app.schemas.report_tracker import (
     ReportTrackerListResponse,
     ReportTrackerUpdateRequest,
     AssignUserToStepRequest,
+    AssignUserToStepV2Request,
     ReportTrackerWorkflowResponse
 )
 from app.services.report_tracker_service import ReportTrackerService
@@ -367,21 +368,25 @@ async def get_report_tracker(
     )
 
 
-@router.post("/assign-user", response_model=ReportTrackerResponse)
+@router.post("/assign-user", response_model=ReportTrackerResponse, deprecated=True)
 async def assign_user_to_step(
     assign_data: AssignUserToStepRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db)
 ):
     """
+    **Deprecated** — use POST /assign-user-v2 instead.
+
     Assign a user to a particular step in the workflow of a particular report.
-    
+
     Finds the step in progress_tracker where:
     - status is "in_progress"
     - stage_name matches
     - step_name matches
-    
+
     Then adds an assignee object to that step's app_data.assignee array.
     """
+    response.headers["Deprecation"] = "assign-user-v1"
     try:
         tracker = await ReportTrackerService.assign_user_to_step(
             db=db,
@@ -400,7 +405,61 @@ async def assign_user_to_step(
                 detail=f"Report tracker with report_id '{assign_data.report_id}' not found"
             )
         
-        # Manually construct response to debug validation error
+        return ReportTrackerResponse(
+            id=tracker.id,
+            report_id=tracker.report_id,
+            transaction_id=tracker.transaction_id,
+            pr_id=tracker.pr_id,
+            cpm_id=tracker.cpm_id,
+            action_code=tracker.action_code,
+            workflow_json=tracker.workflow_json,
+            workflow_steps_json=tracker.workflow_steps_json,
+            created_at=tracker.created_at,
+            updated_at=tracker.updated_at
+        )
+    except UnprocessableEntityException as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(e.detail)
+        )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.post("/assign-user-v2", response_model=ReportTrackerResponse)
+async def assign_user_to_step_v2(
+    assign_data: AssignUserToStepV2Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Assign a user to a workflow step identified by instance_id (v2).
+
+    Deactivates all currently active assignees on the target step,
+    then appends a new assignee record with full lifecycle timestamps.
+    Works on steps in any status (yet_to_start, in_progress, completed, retry).
+    """
+    try:
+        tracker = await ReportTrackerService.assign_user_to_step_v2(
+            db=db,
+            report_id=assign_data.report_id,
+            instance_id=assign_data.instance_id,
+            user_id=assign_data.user_id,
+            user_name=assign_data.user_name,
+            user_email=assign_data.user_email,
+            role=assign_data.role
+        )
+
+        if not tracker:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Report tracker with report_id '{assign_data.report_id}' not found"
+            )
+
         return ReportTrackerResponse(
             id=tracker.id,
             report_id=tracker.report_id,

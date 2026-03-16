@@ -643,6 +643,7 @@ class ReportTrackerService:
             # Mark current instance as completed (preserves audit trail)
             current_step["status"] = "completed"
             current_step["completed_at"] = current_time
+            ReportTrackerService._set_assignee_timestamps_on_completion(current_step, current_time)
             
             # Create a new instance of the same step with fresh instance_id
             new_step_instance = ReportTrackerService._create_step_object(
@@ -651,6 +652,7 @@ class ReportTrackerService:
             
             # Insert the new instance right after the current step
             steps.insert(current_step_index + 1, new_step_instance)
+            ReportTrackerService._set_assignee_timestamps_on_activation(new_step_instance, current_time)
             return
         
         # =============================================================================
@@ -660,6 +662,7 @@ class ReportTrackerService:
         # =============================================================================
         current_step["status"] = "completed"
         current_step["completed_at"] = current_time
+        ReportTrackerService._set_assignee_timestamps_on_completion(current_step, current_time)
         
         next_step_index = None
         for i in range(current_step_index + 1, len(steps)):
@@ -699,6 +702,7 @@ class ReportTrackerService:
             next_step["status"] = "in_progress"
             if not next_step.get("started_at"):
                 next_step["started_at"] = current_time
+            ReportTrackerService._set_assignee_timestamps_on_activation(next_step, current_time)
             
             while next_step_index < len(steps):
                 next_step = steps[next_step_index]
@@ -888,6 +892,7 @@ class ReportTrackerService:
             # Mark current instance as rejected (preserves audit trail)
             current_step["status"] = "rejected"
             current_step["completed_at"] = current_time
+            ReportTrackerService._set_assignee_timestamps_on_completion(current_step, current_time)
             
             # Create a new instance of the same step with fresh instance_id
             new_step_instance = ReportTrackerService._create_step_object(
@@ -896,6 +901,7 @@ class ReportTrackerService:
             
             # Insert the new instance right after the current step
             steps.insert(current_step_index + 1, new_step_instance)
+            ReportTrackerService._set_assignee_timestamps_on_activation(new_step_instance, current_time)
             return
         
         # =============================================================================
@@ -905,6 +911,7 @@ class ReportTrackerService:
         # =============================================================================
         current_step["status"] = "rejected"
         current_step["completed_at"] = current_time
+        ReportTrackerService._set_assignee_timestamps_on_completion(current_step, current_time)
         
         # Remove all steps after the current step
         steps[:] = steps[:current_step_index + 1]
@@ -1223,14 +1230,14 @@ class ReportTrackerService:
 
     @staticmethod
     def _role_for_lite(step: dict, assignee_value: str) -> str:
-        """Return role string for lite stage: N/A when Unassigned, else first assignee's role from app_data, then actor.role."""
+        """Return role string for lite stage: N/A when Unassigned, else first active assignee's role from app_data, then actor.role."""
         if assignee_value == "Unassigned":
             return "N/A"
         app_data = step.get("app_data") or {}
         assignees = app_data.get("assignee")
         if isinstance(assignees, list) and len(assignees) > 0:
             for a in assignees:
-                if not isinstance(a, dict):
+                if not ReportTrackerService._is_assignee_active(a):
                     continue
                 role_raw = a.get("role")
                 if role_raw is not None and str(role_raw).strip():
@@ -1254,7 +1261,7 @@ class ReportTrackerService:
         if not isinstance(assignees, list) or len(assignees) == 0:
             return "Unassigned"
         for a in assignees:
-            if not isinstance(a, dict):
+            if not ReportTrackerService._is_assignee_active(a):
                 continue
             name = a.get("user_name") or a.get("name")
             if name and str(name).strip():
@@ -1402,5 +1409,122 @@ class ReportTrackerService:
         await db.commit()
         await db.refresh(tracker)
         
+        return tracker
+
+    @staticmethod
+    def _is_assignee_active(assignee: dict) -> bool:
+        """Check whether an assignee record is currently active.
+
+        Handles both v1 records (no ``status`` key, treated as active)
+        and v2 records (explicit ``status`` field).
+        """
+        if not isinstance(assignee, dict):
+            return False
+        status = assignee.get("status")
+        if status is None:
+            return True
+        return status == "active"
+
+    @staticmethod
+    def _set_assignee_timestamps_on_completion(step: dict, current_time: str) -> None:
+        """Set ``completed_at`` on every active assignee of *step*."""
+        assignees = (step.get("app_data") or {}).get("assignee")
+        if not isinstance(assignees, list):
+            return
+        for a in assignees:
+            if ReportTrackerService._is_assignee_active(a):
+                a["completed_at"] = current_time
+
+    @staticmethod
+    def _set_assignee_timestamps_on_activation(step: dict, current_time: str) -> None:
+        """Set ``started_at`` on every active assignee whose ``started_at`` is still ``None``."""
+        assignees = (step.get("app_data") or {}).get("assignee")
+        if not isinstance(assignees, list):
+            return
+        for a in assignees:
+            if ReportTrackerService._is_assignee_active(a) and a.get("started_at") is None:
+                a["started_at"] = current_time
+
+    @staticmethod
+    async def assign_user_to_step_v2(
+        db: AsyncSession,
+        report_id: str,
+        instance_id: str,
+        user_id: str,
+        user_name: str,
+        user_email: str,
+        role: str,
+    ) -> Optional[ReportTracker]:
+        """
+        Assign a user to a workflow step identified by instance_id (v2).
+
+        Deactivates all currently active assignees on the target step, then
+        appends a new assignee record with full lifecycle timestamps.  Works
+        on steps in any status (yet_to_start, in_progress, completed, retry).
+
+        Returns:
+            Updated ReportTracker, or None if report_id not found.
+
+        Raises:
+            UnprocessableEntityException: If instance_id not found in progress_tracker.
+        """
+        from app.exceptions import UnprocessableEntityException
+
+        tracker = await ReportTrackerService.get_by_report_id(db, report_id)
+        if not tracker:
+            return None
+
+        if not tracker.workflow_steps_json:
+            tracker.workflow_steps_json = {"progress_tracker": []}
+        if "progress_tracker" not in tracker.workflow_steps_json:
+            tracker.workflow_steps_json["progress_tracker"] = []
+
+        steps = tracker.workflow_steps_json["progress_tracker"]
+
+        target_step = None
+        for step in steps:
+            if step.get("instance_id") == instance_id:
+                target_step = step
+                break
+
+        if not target_step:
+            raise UnprocessableEntityException(
+                detail=f"Step with instance_id '{instance_id}' not found in progress tracker"
+            )
+
+        if "app_data" not in target_step:
+            target_step["app_data"] = {}
+        if not isinstance(target_step["app_data"].get("assignee"), list):
+            target_step["app_data"]["assignee"] = []
+
+        current_time = datetime.now(timezone.utc).isoformat()
+
+        for a in target_step["app_data"]["assignee"]:
+            if ReportTrackerService._is_assignee_active(a):
+                a["status"] = "inactive"
+                a["unassigned_at"] = current_time
+
+        step_status = target_step.get("status")
+        started_at = current_time if step_status in ("in_progress", "retry") else None
+
+        assignee_object = {
+            "user_id": user_id,
+            "user_name": user_name,
+            "user_email": user_email,
+            "role": role,
+            "status": "active",
+            "assigned_at": current_time,
+            "started_at": started_at,
+            "completed_at": None,
+            "unassigned_at": None,
+        }
+
+        target_step["app_data"]["assignee"].append(assignee_object)
+
+        tracker.workflow_steps_json = {"progress_tracker": steps}
+        flag_modified(tracker, "workflow_steps_json")
+        await db.commit()
+        await db.refresh(tracker)
+
         return tracker
 

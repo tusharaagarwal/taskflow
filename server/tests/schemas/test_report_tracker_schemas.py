@@ -8,6 +8,7 @@ from app.schemas.report_tracker import (
     ReportTrackerCreateRequest,
     ReportTrackerUpdateRequest,
     AssignUserToStepRequest,
+    AssignUserToStepV2Request,
     generate_report_id,
 )
 
@@ -154,3 +155,71 @@ class TestAssignUserToStepRequest:
         """Test validation fails with missing required fields."""
         with pytest.raises(ValidationError):
             AssignUserToStepRequest(report_id="REP-001")
+
+
+class TestAssignUserToStepV2Request:
+    """Tests for v2 user assignment request schema."""
+
+    _VALID = dict(
+        report_id="PR-123",
+        instance_id="550e8400-e29b-41d4-a716-446655440000",
+        user_id="user-123",
+        user_name="John Doe",
+        user_email="john@example.com",
+        role="Lead Author",
+    )
+
+    def test_v2_valid_all_fields(self):
+        req = AssignUserToStepV2Request(**self._VALID)
+        assert req.report_id == "PR-123"
+        assert req.instance_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert req.user_id == "user-123"
+        assert req.user_name == "John Doe"
+        assert req.user_email == "john@example.com"
+        assert req.role == "Lead Author"
+
+    def test_v2_missing_report_id(self):
+        data = {**self._VALID}
+        del data["report_id"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_missing_instance_id(self):
+        data = {**self._VALID}
+        del data["instance_id"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_missing_user_id(self):
+        data = {**self._VALID}
+        del data["user_id"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_missing_user_name(self):
+        data = {**self._VALID}
+        del data["user_name"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_missing_user_email(self):
+        data = {**self._VALID}
+        del data["user_email"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_missing_role(self):
+        data = {**self._VALID}
+        del data["role"]
+        with pytest.raises(ValidationError):
+            AssignUserToStepV2Request(**data)
+
+    def test_v2_empty_string_fields(self):
+        data = {k: "" for k in self._VALID}
+        req = AssignUserToStepV2Request(**data)
+        assert req.report_id == ""
+
+    def test_v2_extra_fields_ignored(self):
+        data = {**self._VALID, "extra_key": "should_be_ignored"}
+        req = AssignUserToStepV2Request(**data)
+        assert not hasattr(req, "extra_key")
