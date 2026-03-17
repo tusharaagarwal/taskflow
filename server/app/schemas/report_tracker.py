@@ -120,12 +120,12 @@ class ReportTrackerCreateRequest(BaseModel):
                 "step_name": step_json.get("step_name"),
                 "stage_name": stage_name,
                 "actor": step_json.get("actor", {}),
-                "is_optional": step_json.get("is_optional", False),
+                "is_optional": step_json.get("is_optional", step_json.get("skippable", False)),
                 "sla": step_json.get("sla", {}),
-                "action_available": step_json.get("action_available", []),
+                "action_available": step_json.get("actions_available", step_json.get("action_available", [])),
                 "app_data": {
                     "assignee": [],
-                    "personas": step_json.get("personas", [])
+                    "personas": step_json.get("persona_required", step_json.get("personas", []))
                 },
                 "started_at": None,
                 "completed_at": None,

@@ -416,12 +416,12 @@ class ReportTrackerService:
             "step_name": step_json.get("step_name"),
             "stage_name": stage_name,
             "actor": step_json.get("actor", {}),
-            "is_optional": step_json.get("is_optional", False),
+            "is_optional": step_json.get("is_optional", step_json.get("skippable", False)),
             "sla": step_json.get("sla", {}),
-            "action_available": step_json.get("action_available", []),
+            "action_available": step_json.get("actions_available", step_json.get("action_available", [])),
             "app_data": {
                 "assignee": [],
-                "personas": step_json.get("personas", [])
+                "personas": step_json.get("persona_required", step_json.get("personas", []))
             },
             "started_at": current_time if default_status != "yet_to_start" else None,
             "completed_at": current_time if is_auto_complete and default_status == "completed" else None,
@@ -471,12 +471,12 @@ class ReportTrackerService:
                 "step_name": step_json.get("step_name"),
                 "stage_name": stage_name,
                 "actor": step_json.get("actor", {}),
-                "is_optional": step_json.get("is_optional", False),
+                "is_optional": step_json.get("is_optional", step_json.get("skippable", False)),
                 "sla": step_json.get("sla", {}),
-                "action_available": step_json.get("action_available", []),
+                "action_available": step_json.get("actions_available", step_json.get("action_available", [])),
                 "app_data": {
                     "assignee": [],
-                    "personas": step_json.get("personas", [])
+                    "personas": step_json.get("persona_required", step_json.get("personas", []))
                 },
                 "started_at": None,
                 "completed_at": None,
@@ -695,7 +695,7 @@ class ReportTrackerService:
                 skipped_step_json = ReportTrackerService._find_step_in_workflow_json(
                     workflow_json, skipped_step.get("step_id")
                 )
-                if skipped_step_json and skipped_step_json.get("is_optional"):
+                if skipped_step_json and skipped_step_json.get("is_optional", skipped_step_json.get("skippable", False)):
                     skipped_step["status"] = "skipped"
                     skipped_step["completed_at"] = current_time
             next_step = steps[next_step_index]
@@ -1067,7 +1067,7 @@ class ReportTrackerService:
 
             # Validate that the requested action is available for this step
             # Get action_available from the workflow JSON definition (source of truth)
-            action_available = target_step_json.get("action_available", [])
+            action_available = target_step_json.get("actions_available", target_step_json.get("action_available", []))
 
             # If action_available list is defined and not empty, validate the action
             # If action_available is empty list or missing, allow all configured actions (backward compatibility)
