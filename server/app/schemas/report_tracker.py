@@ -324,6 +324,35 @@ class ReportTrackerStatusLiteResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReportCurrentStageResponse(BaseModel):
+    """
+    Response schema for current-stage API.
+    """
+    report_id: str
+    current_step_name: Optional[str] = Field(
+        default=None,
+        description="Current active step name (in_progress/retry); null when unavailable",
+    )
+    current_stage_name: Optional[str] = Field(
+        default=None,
+        description="Current active stage name (in_progress/retry); null when unavailable",
+    )
+    steps: List[str] = Field(
+        default_factory=list,
+        description="Ordered list of step names in progress tracker",
+    )
+    actions_available: List[str] = Field(
+        default_factory=list,
+        description="Actions available at the current step",
+    )
+    persona_id: List[int] = Field(
+        default_factory=list,
+        description="Persona IDs available at the current step (integer list)",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ReportTrackerWorkflowResponse(BaseModel):
     """
     Response schema for workflow definition queries.

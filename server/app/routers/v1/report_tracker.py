@@ -6,6 +6,7 @@ from app.db.database import get_db
 from app.schemas.report_tracker import (
     ReportTrackerStatusResponse,
     ReportTrackerStatusLiteResponse,
+    ReportCurrentStageResponse,
     ReportTrackerResponse, 
     ReportTrackerCreateRequest, 
     ReportTrackerListResponse,
@@ -283,6 +284,26 @@ async def get_report_status_lite(
             detail=f"Report tracker with report_id '{report_id}' not found"
         )
     return status_data
+
+
+@router.get("/{report_id}/current-stage", response_model=ReportCurrentStageResponse)
+async def get_report_current_stage(
+    report_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get current stage summary for workspace consumption.
+
+    Returns current step name and full ordered workflow steps with
+    resolved role and actions available.
+    """
+    stage_data = await ReportTrackerService.get_current_stage_summary(db, report_id)
+    if not stage_data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Report tracker with report_id '{report_id}' not found"
+        )
+    return stage_data
 
 
 @router.get("/{report_id}/status", response_model=ReportTrackerStatusResponse)

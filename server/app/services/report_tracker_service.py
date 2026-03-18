@@ -1328,6 +1328,193 @@ class ReportTrackerService:
         }
 
     @staticmethod
+    def _normalize_actions_available(actions_raw: Any) -> List[str]:
+        """Normalize action list for API response."""
+        if not isinstance(actions_raw, list):
+            return []
+        actions: List[str] = []
+        for value in actions_raw:
+            if value is None:
+                continue
+            action = str(value).strip()
+            if action:
+                actions.append(action)
+        return actions
+
+    @staticmethod
+    def _normalize_deduped_strings(values: List[Any]) -> List[str]:
+        """Trim and dedupe string values while preserving order."""
+        normalized: List[str] = []
+        seen = set()
+        for value in values:
+            if value is None:
+                continue
+            normalized_value = str(value).strip()
+            if not normalized_value or normalized_value in seen:
+                continue
+            normalized.append(normalized_value)
+            seen.add(normalized_value)
+        return normalized
+
+    @staticmethod
+    def _normalize_role_persona(role_raw: Any, persona_id_raw: Any) -> Optional[Dict[str, str]]:
+        """Normalize a role/persona pair, skipping blanks."""
+        role = str(role_raw).strip() if role_raw is not None else ""
+        if not role:
+            return None
+        persona_id = str(persona_id_raw).strip() if persona_id_raw is not None else ""
+        return {
+            "role": role,
+            "persona_id": persona_id,
+        }
+
+    @staticmethod
+    def _dedupe_role_persona_items(items: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Dedupe role/persona items while preserving order."""
+        deduped: List[Dict[str, str]] = []
+        seen = set()
+        for item in items:
+            role = item.get("role", "")
+            persona_id = item.get("persona_id", "")
+            key = (role, persona_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append({"role": role, "persona_id": persona_id})
+        return deduped
+
+    @staticmethod
+    def _current_step_roles_available(step: dict) -> List[Dict[str, str]]:
+        """
+        Resolve role/persona pairs available at the current step.
+
+        Priority:
+        1) Active assignee roles from app_data.assignee.
+        2) app_data.personas role/persona data.
+        3) Fallback to actor.role/persona when prior sources are unavailable.
+        """
+        app_data = step.get("app_data") or {}
+        assignees = app_data.get("assignee")
+
+        role_items: List[Dict[str, str]] = []
+        if isinstance(assignees, list):
+            for assignee in assignees:
+                if not ReportTrackerService._is_assignee_active(assignee):
+                    continue
+                normalized = ReportTrackerService._normalize_role_persona(
+                    assignee.get("role"),
+                    assignee.get("persona_id"),
+                )
+                if normalized:
+                    role_items.append(normalized)
+
+        if role_items:
+            return ReportTrackerService._dedupe_role_persona_items(role_items)
+
+        personas = app_data.get("personas")
+        if isinstance(personas, list):
+            for persona in personas:
+                if not isinstance(persona, dict):
+                    continue
+                normalized = ReportTrackerService._normalize_role_persona(
+                    persona.get("role") or persona.get("name"),
+                    persona.get("persona_id") or persona.get("id"),
+                )
+                if normalized:
+                    role_items.append(normalized)
+        if role_items:
+            return ReportTrackerService._dedupe_role_persona_items(role_items)
+
+        actor = step.get("actor") if isinstance(step.get("actor"), dict) else {}
+        actor_item = ReportTrackerService._normalize_role_persona(
+            actor.get("role") if actor else None,
+            (actor.get("persona_id") or actor.get("id")) if actor else None,
+        )
+        if actor_item:
+            return [actor_item]
+        return []
+
+    @staticmethod
+    def _current_step_persona_ids(step: dict) -> List[int]:
+        """
+        Return deduped integer persona IDs from current step app_data.personas only.
+
+        Source-of-truth rule for this API:
+        - Use current_step.app_data.personas
+        - Ignore assignee-level and actor-level persona_id fields
+        """
+        app_data = step.get("app_data") or {}
+        personas_raw = app_data.get("personas")
+        if not isinstance(personas_raw, list):
+            return []
+
+        persona_ids: List[int] = []
+        seen = set()
+        for value in personas_raw:
+            if value is None:
+                continue
+            persona_value: Any = value
+            if isinstance(value, dict):
+                persona_value = value.get("persona_id", value.get("id"))
+            try:
+                persona_int = int(str(persona_value).strip())
+            except (ValueError, TypeError):
+                continue
+            if persona_int in seen:
+                continue
+            seen.add(persona_int)
+            persona_ids.append(persona_int)
+        return persona_ids
+
+    @staticmethod
+    async def get_current_stage_summary(db: AsyncSession, report_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Return current step details and current-step-focused workflow summary.
+
+        Current step is the first step with status in ["in_progress", "retry"].
+        """
+        tracker = await ReportTrackerService.get_by_report_id(db, report_id)
+        if not tracker:
+            return None
+
+        progress_tracker = tracker.workflow_steps_json.get("progress_tracker", []) if tracker.workflow_steps_json else []
+
+        current_step_name: Optional[str] = None
+        current_stage_name: Optional[str] = None
+        actions_available: List[str] = []
+        persona_id: List[int] = []
+        steps: List[str] = []
+
+        for step in progress_tracker:
+            if not isinstance(step, dict):
+                continue
+
+            step_name = str(step.get("step_name") or step.get("step_id") or "").strip()
+            if step_name:
+                steps.append(step_name)
+
+            step_status_raw = step.get("status")
+            step_status = str(step_status_raw).strip() if step_status_raw is not None else ""
+
+            if current_step_name is None and step_status in ("in_progress", "retry"):
+                current_step_name = step_name or None
+                current_stage_raw = step.get("stage_name")
+                current_stage_name = str(current_stage_raw).strip() if current_stage_raw is not None else None
+                actions_available = ReportTrackerService._normalize_actions_available(
+                    step.get("action_available", [])
+                )
+                persona_id = ReportTrackerService._current_step_persona_ids(step)
+
+        return {
+            "report_id": tracker.report_id,
+            "current_step_name": current_step_name,
+            "current_stage_name": current_stage_name,
+            "steps": steps,
+            "actions_available": actions_available,
+            "persona_id": persona_id,
+        }
+
+    @staticmethod
     async def assign_user_to_step(
         db: AsyncSession,
         report_id: str,

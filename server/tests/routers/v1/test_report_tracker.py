@@ -675,6 +675,37 @@ class TestReportTracker:
         assert "progress_tracker" in data
 
     @pytest.mark.asyncio
+    async def test_get_report_current_stage(self, client, sample_report_tracker):
+        """GET /report-tracker/{report_id}/current-stage returns current-step-focused contract."""
+        response = await client.get(f"/report-tracker/{sample_report_tracker.report_id}/current-stage")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["report_id"] == sample_report_tracker.report_id
+        assert "current_step_name" in data
+        assert "current_stage_name" in data
+        assert "steps" in data
+        assert isinstance(data["steps"], list)
+        assert len(data["steps"]) > 0
+        assert isinstance(data["steps"][0], str)
+        assert "actions_available" in data
+        assert isinstance(data["actions_available"], list)
+        assert "persona_id" in data
+        assert isinstance(data["persona_id"], list)
+        if len(data["persona_id"]) > 0:
+            assert isinstance(data["persona_id"][0], int)
+
+    @pytest.mark.asyncio
+    async def test_get_nonexistent_report_current_stage(self, client, db):
+        """GET /report-tracker/{report_id}/current-stage returns 404 when report not found."""
+        response = await client.get("/report-tracker/nonexistent-report-id/current-stage")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        data = response.json()
+        assert "detail" in data
+        assert "not found" in data["detail"].lower()
+
+    @pytest.mark.asyncio
     async def test_get_report_workflow(self, client, sample_report_tracker):
         """Test getting workflow JSON for a report tracker."""
         # Get workflow

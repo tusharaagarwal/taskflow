@@ -330,6 +330,221 @@ class TestReportTrackerServiceAdditional:
         assert result["progress_tracker"] == []
 
     @pytest.mark.asyncio
+    async def test_get_current_stage_summary_returns_none_when_tracker_not_found(self, mock_db):
+        """get_current_stage_summary returns None when tracker is missing."""
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "missing")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_current_stage_summary_returns_current_step_and_lists(self, mock_db):
+        """get_current_stage_summary returns current-step-focused lists for in_progress step."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-3"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {
+                    "instance_id": "i1",
+                    "step_id": "draft",
+                    "step_name": "Draft",
+                    "stage_name": "Authoring",
+                    "status": "in_progress",
+                    "actor": {"role": "analyst"},
+                    "action_available": ["accept", "submit"],
+                    "app_data": {
+                        "assignee": [
+                            {"user_name": "Jane", "role": "Lead Reviewer", "persona_id": 1001, "status": "active"},
+                            {"user_name": "Tom", "role": "Lead Reviewer", "persona_id": 1001, "status": "active"},
+                            {"user_name": "Old", "role": "Legacy", "status": "inactive"},
+                        ],
+                        "personas": [4],
+                    },
+                },
+                {
+                    "instance_id": "i2",
+                    "step_id": "review",
+                    "step_name": "Review",
+                    "stage_name": "Review",
+                    "status": "yet_to_start",
+                    "actor": {"role": "reviewer"},
+                    "action_available": "invalid_type",
+                    "app_data": {"assignee": []},
+                },
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "R-3")
+
+        assert result is not None
+        assert result["report_id"] == "R-3"
+        assert result["current_step_name"] == "Draft"
+        assert result["current_stage_name"] == "Authoring"
+        assert result["steps"] == ["Draft", "Review"]
+        assert result["actions_available"] == ["accept", "submit"]
+        assert result["persona_id"] == [4]
+
+    @pytest.mark.asyncio
+    async def test_get_current_stage_summary_uses_retry_as_current(self, mock_db):
+        """retry step is selected as current step when in_progress is absent."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-4"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {
+                    "instance_id": "i1",
+                    "step_id": "review",
+                    "step_name": "Review Retry",
+                    "stage_name": "Review",
+                    "status": "retry",
+                    "actor": {"role": "reviewer"},
+                    "action_available": [],
+                    "app_data": {
+                        "assignee": [
+                            {"user_name": "Jane", "role": "Lead Reviewer", "persona_id": 1002, "status": "active"}
+                        ],
+                        "personas": [9],
+                    },
+                }
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "R-4")
+
+        assert result is not None
+        assert result["current_step_name"] == "Review Retry"
+        assert result["steps"] == ["Review Retry"]
+        assert result["persona_id"] == [9]
+
+    @pytest.mark.asyncio
+    async def test_get_current_stage_summary_returns_empty_current_lists_without_active_step(self, mock_db):
+        """When no in_progress/retry step exists, current-step roles/actions lists are empty."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-5"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {
+                    "instance_id": "i1",
+                    "step_id": "draft",
+                    "step_name": "Draft",
+                    "stage_name": "Authoring",
+                    "status": "completed",
+                    "actor": {"role": "analyst"},
+                    "action_available": ["accept"],
+                    "app_data": {"assignee": []},
+                },
+                {
+                    "instance_id": "i2",
+                    "step_id": "approval",
+                    "step_name": "",
+                    "stage_name": "Approval",
+                    "status": "yet_to_start",
+                    "actor": {"role": "approver"},
+                    "action_available": ["approve"],
+                    "app_data": {"assignee": []},
+                },
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "R-5")
+
+        assert result is not None
+        assert result["current_step_name"] is None
+        assert result["current_stage_name"] is None
+        assert result["steps"] == ["Draft", "approval"]
+        assert result["persona_id"] == []
+        assert result["actions_available"] == []
+
+    @pytest.mark.asyncio
+    async def test_get_current_stage_summary_roles_fallback_to_personas_when_assignee_missing(self, mock_db):
+        """Persona IDs are sourced from app_data.personas when assignee persona_id is missing."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-6"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {
+                    "instance_id": "i1",
+                    "step_id": "copy-edit",
+                    "step_name": "Copy Edit",
+                    "stage_name": "Editing",
+                    "status": "in_progress",
+                    "actor": {"role": "copy_editor", "persona_id": 101},
+                    "action_available": ["submit"],
+                    "app_data": {
+                        "assignee": [{"user_name": "NoRoleUser", "status": "active"}],
+                        "personas": [
+                            {"role": "Copy Editor", "persona_id": 2001},
+                            {"role": "Copy Editor", "persona_id": 2001},
+                        ],
+                    },
+                }
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "R-6")
+
+        assert result is not None
+        assert result["persona_id"] == [2001]
+
+    @pytest.mark.asyncio
+    async def test_get_current_stage_summary_ignores_assignee_actor_persona_ids_when_personas_missing(self, mock_db):
+        """assignee/actor persona_id values are ignored when app_data.personas is absent."""
+        mock_tracker = MagicMock()
+        mock_tracker.report_id = "R-7"
+        mock_tracker.workflow_steps_json = {
+            "progress_tracker": [
+                {
+                    "instance_id": "i1",
+                    "step_id": "copy-edit",
+                    "step_name": "Copy Edit",
+                    "stage_name": "Editing",
+                    "status": "in_progress",
+                    "actor": {"role": "copy_editor", "persona_id": 9999},
+                    "action_available": ["submit"],
+                    "app_data": {
+                        "assignee": [
+                            {"user_name": "Rakesh", "role": "Copy Editor", "persona_id": 8888, "status": "active"}
+                        ]
+                    },
+                }
+            ]
+        }
+        with patch.object(
+            ReportTrackerService,
+            "get_by_report_id",
+            new_callable=AsyncMock,
+            return_value=mock_tracker,
+        ):
+            result = await ReportTrackerService.get_current_stage_summary(mock_db, "R-7")
+
+        assert result is not None
+        assert result["persona_id"] == []
+
+    @pytest.mark.asyncio
     async def test_assign_user_to_step_returns_none_when_tracker_not_found(self, mock_db):
         """assign_user_to_step returns None when report not found."""
         with patch.object(
