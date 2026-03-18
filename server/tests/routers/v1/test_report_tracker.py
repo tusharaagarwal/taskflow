@@ -199,7 +199,7 @@ def mock_cpm_and_workflow(monkeypatch):
         import uuid
         prefix = "CO" if "Credit" in document_type else "RPT"
         random_suffix = uuid.uuid4().hex[:6].upper()
-        return f"{prefix}-{random_suffix}"
+        return f"{prefix}_{random_suffix}"
     
     monkeypatch.setattr(ReportTrackerService, "_generate_unique_report_id", mock_generate_id)
 
@@ -362,7 +362,7 @@ class TestReportTracker:
             print(f"\n[DEBUG] Create failed: {response.status_code} - {response.text}\n")
         assert response.status_code == status.HTTP_201_CREATED
         data = response.json()
-        assert data["report_id"].startswith("CO-")  # Matches mocked ID format
+        assert data["report_id"].startswith("CO_")  # Matches mocked ID format
         assert data["transaction_id"] == "TXN-12345"
         assert "workflow_steps_json" in data
 
@@ -798,7 +798,7 @@ class TestReportTracker:
         async def mock_seq_generator(db, dt):
             nonlocal counter
             counter += 1
-            return f"CO-{100000+counter}"
+            return f"CO_{100000+counter:08d}"
             
         with patch.object(ReportTrackerService, '_generate_unique_report_id', side_effect=mock_seq_generator):
             for report in reports:

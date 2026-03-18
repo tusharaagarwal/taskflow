@@ -142,22 +142,22 @@ class ReportTrackerService:
             document_type: Document type name
             
         Returns:
-            Formatted report ID strings (e.g. 'CO-100001')
+            Formatted report ID strings (e.g. 'CO_00010001')
         """
         from app.services.abbreviation_service import AbbreviationService
         from sqlalchemy import text
-        
+
         abbreviation_service = AbbreviationService()
         abbreviation = await abbreviation_service.get_abbreviation(db, document_type)
-        
+
         # Get next sequence value from PostgreSQL
-        # Note: This specific SQL is Postgres-only. 
+        # Note: This specific SQL is Postgres-only.
         # For testing with SQLite, this method should be mocked.
         result = await db.execute(text("SELECT nextval('report_id_seq')"))
         sequence_value = result.scalar()
-        
-        # Format: {ABBREVIATION}-{SEQUENCE}
-        return f"{abbreviation}-{sequence_value}"
+
+        # Format: {ABBREVIATION}_{SEQUENCE_8D}
+        return f"{abbreviation}_{sequence_value:08d}"
 
     @staticmethod
     async def get_by_report_id(db: AsyncSession, report_id: str) -> Optional[ReportTracker]:
