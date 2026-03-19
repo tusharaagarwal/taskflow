@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import uuid
@@ -427,6 +428,44 @@ class ReportTrackerService:
             "completed_at": current_time if is_auto_complete and default_status == "completed" else None,
             "status": default_status
         }
+
+    @staticmethod
+    def _clone_step_instance(source_step: dict, status: str = "yet_to_start") -> dict:
+        """
+        Deep-copy an existing step instance, preserving all accumulated data
+        (app_data, assignees, personas, analytics, etc.) while resetting
+        identity and temporal fields for a new lifecycle.
+
+        Assignee records keep assigned_at/unassigned_at/status but get their
+        started_at and completed_at cleared so that
+        _set_assignee_timestamps_on_activation and
+        _set_assignee_timestamps_on_completion set fresh values.
+        """
+        cloned = copy.deepcopy(source_step)
+        cloned["instance_id"] = str(uuid.uuid4())
+        cloned["status"] = status
+        cloned["started_at"] = None
+        cloned["completed_at"] = None
+        assignees = (cloned.get("app_data") or {}).get("assignee")
+        if isinstance(assignees, list):
+            for a in assignees:
+                if isinstance(a, dict):
+                    a["started_at"] = None
+                    a["completed_at"] = None
+        return cloned
+
+    @staticmethod
+    def _find_latest_instance_by_step_id(
+        steps: list, step_id: str, up_to_index: int
+    ) -> Optional[dict]:
+        """
+        Search backwards through steps[0..up_to_index] for the most recent
+        instance of a given step_id. Returns None if no instance exists.
+        """
+        for i in range(up_to_index, -1, -1):
+            if steps[i].get("step_id") == step_id:
+                return steps[i]
+        return None
 
     @staticmethod
     def _build_happy_path(workflow_json: dict, start_step_id: str, current_time: str) -> list:
@@ -907,32 +946,79 @@ class ReportTrackerService:
         # =============================================================================
         # NORMAL REJECTION FLOW (Go to different step)
         # =============================================================================
-        # Mark current step as rejected and rebuild path from fail_goto step
+        # Walk the default success_goto chain from the workflow JSON to determine
+        # the forward path (same chain that _build_happy_path uses).  For each
+        # step_id in that chain, look for the latest existing instance *anywhere*
+        # in the tracker (history AND forward yet_to_start steps) and clone it,
+        # preserving accumulated app_data (assignees, personas, analytics, etc.).
+        # Only fall back to _create_step_object for steps that have no instance
+        # at all in the tracker.
+        #
+        # This ensures:
+        #   - The forward path follows workflow defaults (user makes new choices)
+        #   - Data accumulated on any previously visited step is preserved
+        #   - Pre-assigned data on yet_to_start forward steps is preserved
+        #     (assign_user_to_step_v2 works on steps in any status)
         # =============================================================================
         current_step["status"] = "rejected"
         current_step["completed_at"] = current_time
         ReportTrackerService._set_assignee_timestamps_on_completion(current_step, current_time)
-        
-        # Remove all steps after the current step
-        steps[:] = steps[:current_step_index + 1]
-        
-        # Find the fail_goto step definition in workflow JSON
-        fail_step_json = ReportTrackerService._find_step_in_workflow_json(
-            workflow_json, fail_goto
-        )
-        
-        if not fail_step_json:
-            raise UnprocessableEntityException(
-                detail=f"Step JSON not found for fail_goto step {fail_goto}"
+
+        step_map: Dict[str, dict] = {}
+        for step in workflow_json.get("steps", []):
+            sid = step.get("step_id")
+            if sid:
+                step_map[sid] = step
+
+        chain_step_ids: List[str] = []
+        visited_chain: set = set()
+        walker = fail_goto
+        while walker and walker != "NA" and walker not in visited_chain:
+            visited_chain.add(walker)
+            if walker not in step_map:
+                break
+            chain_step_ids.append(walker)
+            transitions = step_map[walker].get("transitions", {})
+            success_goto_raw = transitions.get("success_goto")
+            walker = ReportTrackerService._get_default_transition(success_goto_raw)
+
+        cloned_steps: List[dict] = []
+        last_search_index = len(steps) - 1
+        for idx, chain_sid in enumerate(chain_step_ids):
+            existing = ReportTrackerService._find_latest_instance_by_step_id(
+                steps, chain_sid, last_search_index
             )
-        
-        # Rebuild the happy path starting from fail_goto step
-        happy_path = ReportTrackerService._build_happy_path(
-            workflow_json, fail_goto, current_time
-        )
-        
-        # Append the new path to progress tracker
-        steps.extend(happy_path)
+            if existing:
+                clone = ReportTrackerService._clone_step_instance(existing, status="yet_to_start")
+            else:
+                step_json = step_map.get(chain_sid)
+                if not step_json:
+                    raise UnprocessableEntityException(
+                        detail=f"Step JSON not found for step {chain_sid} in rejection chain"
+                    )
+                clone = ReportTrackerService._create_step_object(step_json, status="yet_to_start")
+
+            if idx == 0:
+                stage_name = clone.get("stage_name", "")
+                is_auto_complete = ReportTrackerService._is_auto_complete_stage(stage_name)
+                clone["status"] = "in_progress"
+                clone["started_at"] = current_time
+                if is_auto_complete:
+                    clone["status"] = "completed"
+                    clone["completed_at"] = current_time
+
+            cloned_steps.append(clone)
+
+        if not cloned_steps:
+            raise UnprocessableEntityException(
+                detail=f"Could not build rejection chain from {fail_goto} to {current_step_id}"
+            )
+
+        steps[:] = steps[:current_step_index + 1] + cloned_steps
+
+        first_cloned = cloned_steps[0]
+        if first_cloned["status"] == "in_progress":
+            ReportTrackerService._set_assignee_timestamps_on_activation(first_cloned, current_time)
 
     @staticmethod
     async def update(db: AsyncSession, report_id: str, update_data) -> Optional[ReportTracker]:

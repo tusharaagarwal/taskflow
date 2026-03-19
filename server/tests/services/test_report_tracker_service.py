@@ -1301,3 +1301,807 @@ class TestGetterHelpers:
             {"role": "New Role", "status": "active"},
         ]}}
         assert ReportTrackerService._role_for_lite(step, "New") == "New Role"
+
+
+class TestCloneStepInstance:
+    """Tests for _clone_step_instance helper."""
+
+    def test_clone_preserves_app_data_and_resets_assignee_timestamps(self):
+        source = {
+            "instance_id": "original-id",
+            "step_id": "draft",
+            "step_name": "Initial Draft",
+            "stage_name": "Authoring",
+            "status": "completed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-02T00:00:00Z",
+            "app_data": {
+                "assignee": [
+                    {"user_id": "u1", "user_name": "Alice", "role": "Lead Author",
+                     "status": "active",
+                     "assigned_at": "2026-01-01T00:00:00Z",
+                     "started_at": "2026-01-01T01:00:00Z",
+                     "completed_at": "2026-01-02T00:00:00Z",
+                     "unassigned_at": None},
+                    {"user_id": "u0", "user_name": "Bob", "role": "Author",
+                     "status": "inactive",
+                     "assigned_at": "2025-12-20T00:00:00Z",
+                     "started_at": "2025-12-20T01:00:00Z",
+                     "completed_at": None,
+                     "unassigned_at": "2025-12-31T00:00:00Z"},
+                ],
+                "personas": [101, 102],
+                "custom_analytics": {"views": 42},
+            },
+            "actor": {"role": "analyst"},
+            "sla": {"hours": 24},
+        }
+        clone = ReportTrackerService._clone_step_instance(source, status="in_progress")
+
+        assert clone["instance_id"] != "original-id"
+        assert clone["status"] == "in_progress"
+        assert clone["started_at"] is None
+        assert clone["completed_at"] is None
+        assert clone["step_id"] == "draft"
+        assert clone["app_data"]["custom_analytics"]["views"] == 42
+        assert clone["sla"] == {"hours": 24}
+
+        alice = clone["app_data"]["assignee"][0]
+        assert alice["user_id"] == "u1"
+        assert alice["status"] == "active"
+        assert alice["assigned_at"] == "2026-01-01T00:00:00Z"
+        assert alice["started_at"] is None
+        assert alice["completed_at"] is None
+        assert alice["unassigned_at"] is None
+
+        bob = clone["app_data"]["assignee"][1]
+        assert bob["status"] == "inactive"
+        assert bob["assigned_at"] == "2025-12-20T00:00:00Z"
+        assert bob["started_at"] is None
+        assert bob["completed_at"] is None
+        assert bob["unassigned_at"] == "2025-12-31T00:00:00Z"
+
+    def test_clone_is_deep_copy(self):
+        source = {
+            "instance_id": "orig",
+            "status": "completed",
+            "started_at": "t0",
+            "completed_at": "t1",
+            "app_data": {"assignee": [{"user_id": "u1"}]},
+        }
+        clone = ReportTrackerService._clone_step_instance(source)
+        clone["app_data"]["assignee"].append({"user_id": "u2"})
+
+        assert len(source["app_data"]["assignee"]) == 1
+
+    def test_clone_default_status_is_yet_to_start(self):
+        source = {"instance_id": "x", "status": "completed", "started_at": "t0", "completed_at": "t1"}
+        clone = ReportTrackerService._clone_step_instance(source)
+        assert clone["status"] == "yet_to_start"
+
+
+class TestFindLatestInstanceByStepId:
+    """Tests for _find_latest_instance_by_step_id helper."""
+
+    def test_finds_latest_instance(self):
+        steps = [
+            {"step_id": "A", "instance_id": "A1", "app_data": {"v": 1}},
+            {"step_id": "B", "instance_id": "B1"},
+            {"step_id": "A", "instance_id": "A2", "app_data": {"v": 2}},
+            {"step_id": "C", "instance_id": "C1"},
+        ]
+        result = ReportTrackerService._find_latest_instance_by_step_id(steps, "A", up_to_index=3)
+        assert result["instance_id"] == "A2"
+        assert result["app_data"]["v"] == 2
+
+    def test_respects_up_to_index_boundary(self):
+        steps = [
+            {"step_id": "A", "instance_id": "A1"},
+            {"step_id": "B", "instance_id": "B1"},
+            {"step_id": "A", "instance_id": "A2"},
+        ]
+        result = ReportTrackerService._find_latest_instance_by_step_id(steps, "A", up_to_index=1)
+        assert result["instance_id"] == "A1"
+
+    def test_returns_none_when_not_found(self):
+        steps = [{"step_id": "B", "instance_id": "B1"}]
+        result = ReportTrackerService._find_latest_instance_by_step_id(steps, "A", up_to_index=0)
+        assert result is None
+
+    def test_empty_steps(self):
+        result = ReportTrackerService._find_latest_instance_by_step_id([], "A", up_to_index=-1)
+        assert result is None
+
+
+class TestNormalRejectionFlowPreservesData:
+    """Tests for the clone-based normal rejection flow in _reject."""
+
+    @staticmethod
+    def _make_workflow(*step_defs):
+        steps = []
+        for i, sd in enumerate(step_defs):
+            step = {
+                "step_id": sd["id"],
+                "step_name": sd.get("name", sd["id"]),
+                "stage_name": sd.get("stage", "Stage"),
+                "transitions": {
+                    "success_goto": sd.get("success_goto", "NA"),
+                    "fail_goto": sd.get("fail_goto", "NA"),
+                },
+                "actor": sd.get("actor", {}),
+                "is_optional": False,
+                "sla": {},
+            }
+            steps.append(step)
+        return {"steps": steps}
+
+    @staticmethod
+    def _make_step_instance(step_id, status, instance_id=None, app_data=None, **extra):
+        inst = {
+            "instance_id": instance_id or f"inst-{step_id}",
+            "step_id": step_id,
+            "step_name": step_id,
+            "stage_name": "Stage",
+            "status": status,
+            "started_at": "2026-01-01T00:00:00Z" if status != "yet_to_start" else None,
+            "completed_at": "2026-01-02T00:00:00Z" if status == "completed" else None,
+            "actor": {},
+            "is_optional": False,
+            "sla": {},
+            "action_available": [],
+            "app_data": app_data or {"assignee": [], "personas": []},
+        }
+        inst.update(extra)
+        return inst
+
+    def test_reject_preserves_assignee_data(self):
+        """Core test: rejection clones existing instances, preserving assignees."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B", "fail_goto": "NA"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "NA", "fail_goto": "NA"},
+        )
+        assignee_data = {
+            "assignee": [
+                {"user_id": "u1", "user_name": "Alice", "role": "Lead", "status": "active",
+                 "started_at": "t0", "completed_at": "t1"}
+            ],
+            "personas": [101],
+            "custom_field": "preserved",
+        }
+        steps = [
+            self._make_step_instance("A", "completed", app_data=assignee_data),
+            self._make_step_instance("B", "in_progress", app_data={
+                "assignee": [{"user_id": "u2", "status": "active"}], "personas": [102]
+            }),
+            self._make_step_instance("C", "yet_to_start", app_data={
+                "assignee": [{"user_id": "u3", "status": "active"}], "personas": [103]
+            }),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        assert steps[1]["status"] == "rejected"
+
+        cloned_a = steps[2]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["instance_id"] != steps[0]["instance_id"]
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "u1"
+        assert cloned_a["app_data"]["custom_field"] == "preserved"
+
+        cloned_b = steps[3]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["status"] == "yet_to_start"
+        assert cloned_b["instance_id"] != steps[1]["instance_id"]
+        assert cloned_b["app_data"]["assignee"][0]["user_id"] == "u2"
+
+        preserved_c = steps[4]
+        assert preserved_c["step_id"] == "C"
+        assert preserved_c["status"] == "yet_to_start"
+        assert preserved_c["app_data"]["assignee"][0]["user_id"] == "u3"
+
+    def test_reject_preserves_forward_steps_data(self):
+        """Forward yet_to_start steps with pre-assigned data are cloned with data preserved."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "D"},
+            {"id": "D", "success_goto": "NA"},
+        )
+        forward_app_data = {
+            "assignee": [{"user_id": "pre-assigned", "status": "active"}],
+            "personas": [999],
+        }
+        steps = [
+            self._make_step_instance("A", "completed"),
+            self._make_step_instance("B", "in_progress"),
+            self._make_step_instance("C", "yet_to_start", app_data=forward_app_data),
+            self._make_step_instance("D", "yet_to_start", app_data={
+                "assignee": [{"user_id": "d-user"}], "personas": [888]
+            }),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        assert len(steps) == 6
+        assert steps[2]["step_id"] == "A"
+        assert steps[2]["status"] == "in_progress"
+        assert steps[3]["step_id"] == "B"
+        assert steps[3]["status"] == "yet_to_start"
+        cloned_c = steps[4]
+        assert cloned_c["step_id"] == "C"
+        assert cloned_c["app_data"]["assignee"][0]["user_id"] == "pre-assigned"
+        assert cloned_c["instance_id"] != "inst-C"
+        cloned_d = steps[5]
+        assert cloned_d["step_id"] == "D"
+        assert cloned_d["app_data"]["assignee"][0]["user_id"] == "d-user"
+        assert cloned_d["instance_id"] != "inst-D"
+
+    def test_reject_clones_use_latest_instance(self):
+        """When a step has been visited multiple times, the latest instance is used as clone source."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed", instance_id="A-v1",
+                                     app_data={"assignee": [{"user_id": "old"}], "personas": []}),
+            self._make_step_instance("B", "completed", instance_id="B-v1"),
+            self._make_step_instance("A", "completed", instance_id="A-v2",
+                                     app_data={"assignee": [{"user_id": "latest"}], "personas": []}),
+            self._make_step_instance("B", "completed", instance_id="B-v2"),
+            self._make_step_instance("C", "in_progress", instance_id="C-v1"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[4], workflow["steps"][2], workflow
+        )
+
+        cloned_a = steps[5]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "latest"
+
+    def test_reject_no_forward_steps(self):
+        """Rejection when rejected step is the last step (no forward steps to preserve)."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed"),
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        assert len(steps) == 4
+        assert steps[1]["status"] == "rejected"
+        assert steps[2]["step_id"] == "A"
+        assert steps[2]["status"] == "in_progress"
+        assert steps[3]["step_id"] == "B"
+        assert steps[3]["status"] == "yet_to_start"
+
+    def test_reject_multi_step_jump_back(self):
+        """Rejection jumping back multiple steps (e.g., Step D -> Step A)."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C"},
+            {"id": "C", "success_goto": "D"},
+            {"id": "D", "success_goto": "NA", "fail_goto": "A"},
+        )
+        a_data = {"assignee": [{"user_id": "author"}], "personas": [10]}
+        b_data = {"assignee": [{"user_id": "reviewer"}], "personas": [20]}
+        c_data = {"assignee": [{"user_id": "editor"}], "personas": [30]}
+        steps = [
+            self._make_step_instance("A", "completed", app_data=a_data),
+            self._make_step_instance("B", "completed", app_data=b_data),
+            self._make_step_instance("C", "completed", app_data=c_data),
+            self._make_step_instance("D", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[3], workflow["steps"][3], workflow
+        )
+
+        assert steps[3]["status"] == "rejected"
+        assert len(steps) == 8
+        assert steps[4]["step_id"] == "A"
+        assert steps[4]["status"] == "in_progress"
+        assert steps[4]["app_data"]["assignee"][0]["user_id"] == "author"
+        assert steps[5]["step_id"] == "B"
+        assert steps[5]["status"] == "yet_to_start"
+        assert steps[5]["app_data"]["assignee"][0]["user_id"] == "reviewer"
+        assert steps[6]["step_id"] == "C"
+        assert steps[6]["status"] == "yet_to_start"
+        assert steps[6]["app_data"]["assignee"][0]["user_id"] == "editor"
+        assert steps[7]["step_id"] == "D"
+        assert steps[7]["status"] == "yet_to_start"
+
+    def test_reject_clone_resets_temporal_fields(self):
+        """Cloned steps have fresh instance_ids and reset started_at/completed_at."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed"),
+            self._make_step_instance("B", "in_progress"),
+        ]
+        original_a_instance = steps[0]["instance_id"]
+        original_b_instance = steps[1]["instance_id"]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        cloned_a = steps[2]
+        cloned_b = steps[3]
+        assert cloned_a["instance_id"] != original_a_instance
+        assert cloned_b["instance_id"] != original_b_instance
+        assert cloned_b["started_at"] is None
+        assert cloned_b["completed_at"] is None
+
+    def test_reject_fallback_to_create_for_unvisited_step(self):
+        """If a step in the rejection chain was never visited, falls back to _create_step_object."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "NA"},
+        )
+        steps = [
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[0], workflow["steps"][1], workflow
+        )
+
+        assert steps[0]["status"] == "rejected"
+        cloned_a = steps[1]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["app_data"]["assignee"] == []
+
+    def test_reject_auto_complete_first_step(self):
+        """If fail_goto points to an auto-complete stage, it gets completed immediately."""
+        workflow = {
+            "steps": [
+                {"step_id": "pub", "step_name": "Published", "stage_name": "Published",
+                 "transitions": {"success_goto": "review"}, "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "review", "step_name": "Review", "stage_name": "Review",
+                 "transitions": {"success_goto": "NA", "fail_goto": "pub"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            self._make_step_instance("pub", "completed", stage_name="Published"),
+            self._make_step_instance("review", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        cloned_pub = steps[2]
+        assert cloned_pub["step_id"] == "pub"
+        assert cloned_pub["status"] == "completed"
+        assert cloned_pub["completed_at"] is not None
+
+    def test_reject_does_not_mutate_original_steps(self):
+        """Cloning must not mutate the original step instances' app_data."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "NA", "fail_goto": "A"},
+        )
+        original_app_data = {
+            "assignee": [{"user_id": "u1", "status": "active"}],
+            "personas": [101],
+        }
+        steps = [
+            self._make_step_instance("A", "completed", app_data=original_app_data),
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        cloned_a = steps[2]
+        cloned_a["app_data"]["assignee"].append({"user_id": "u2"})
+        assert len(steps[0]["app_data"]["assignee"]) == 1
+
+    def test_reject_with_path_resolving_to_different_step(self):
+        """Rejection with path parameter resolving fail_goto to a specific step."""
+        workflow = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": "B"}, "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {
+                     "success_goto": "NA",
+                     "fail_goto": {"default": "A", "special": "A"},
+                 },
+                 "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            self._make_step_instance("A", "completed", app_data={
+                "assignee": [{"user_id": "preserved-user"}], "personas": []
+            }),
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow, path="special"
+        )
+
+        assert steps[1]["status"] == "rejected"
+        assert steps[2]["step_id"] == "A"
+        assert steps[2]["app_data"]["assignee"][0]["user_id"] == "preserved-user"
+
+    def test_reject_follows_default_chain_not_old_branch(self):
+        """When a branching success_goto was previously taken (X instead of default B),
+        rejection follows the DEFAULT chain A -> B -> C, not the old A -> X -> C.
+        B is created fresh (never visited), A and C preserve their data."""
+        workflow = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": {"default": "B", "branch": "X"}},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "C"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "X", "step_name": "X", "stage_name": "S",
+                 "transitions": {"success_goto": "C"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "C", "step_name": "C", "stage_name": "S",
+                 "transitions": {"success_goto": "NA", "fail_goto": "A"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        steps = [
+            self._make_step_instance("A", "completed", app_data={
+                "assignee": [{"user_id": "author"}], "personas": [10]
+            }),
+            self._make_step_instance("X", "completed", app_data={
+                "assignee": [{"user_id": "branch-user"}], "personas": [777],
+                "branch_analytics": {"score": 99},
+            }),
+            self._make_step_instance("C", "in_progress", app_data={
+                "assignee": [{"user_id": "carol"}], "personas": [30]
+            }),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[2], workflow["steps"][3], workflow
+        )
+
+        assert steps[2]["status"] == "rejected"
+        assert len(steps) == 6
+        cloned_a = steps[3]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "author"
+        cloned_b = steps[4]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["status"] == "yet_to_start"
+        assert cloned_b["app_data"]["assignee"] == []
+        cloned_c = steps[5]
+        assert cloned_c["step_id"] == "C"
+        assert cloned_c["status"] == "yet_to_start"
+        assert cloned_c["app_data"]["assignee"][0]["user_id"] == "carol"
+
+    def test_reject_complex_fail_goto_dict_with_path(self):
+        """Rejection where fail_goto is a complex dict resolved via path parameter,
+        and the target step exists in tracker history."""
+        workflow = {
+            "steps": [
+                {"step_id": "draft", "step_name": "Draft", "stage_name": "Authoring",
+                 "transitions": {"success_goto": "review"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "review", "step_name": "Review", "stage_name": "Review",
+                 "transitions": {"success_goto": "approval"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "approval", "step_name": "Approval", "stage_name": "Approval",
+                 "transitions": {
+                     "success_goto": "NA",
+                     "fail_goto": {"default": "review", "major_revision": "draft"},
+                 },
+                 "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        draft_data = {
+            "assignee": [{"user_id": "author1", "status": "active"}],
+            "personas": [1], "notes": "important draft notes",
+        }
+        review_data = {
+            "assignee": [{"user_id": "reviewer1", "status": "active"}],
+            "personas": [2], "review_comments": ["fix typo"],
+        }
+        steps = [
+            self._make_step_instance("draft", "completed", app_data=draft_data),
+            self._make_step_instance("review", "completed", app_data=review_data),
+            self._make_step_instance("approval", "in_progress", app_data={
+                "assignee": [{"user_id": "approver1"}], "personas": [3]
+            }),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[2], workflow["steps"][2], workflow, path="major_revision"
+        )
+
+        assert steps[2]["status"] == "rejected"
+        assert len(steps) == 6
+        cloned_draft = steps[3]
+        assert cloned_draft["step_id"] == "draft"
+        assert cloned_draft["status"] == "in_progress"
+        assert cloned_draft["app_data"]["notes"] == "important draft notes"
+        assert cloned_draft["app_data"]["assignee"][0]["user_id"] == "author1"
+        cloned_review = steps[4]
+        assert cloned_review["step_id"] == "review"
+        assert cloned_review["app_data"]["review_comments"] == ["fix typo"]
+        cloned_approval = steps[5]
+        assert cloned_approval["step_id"] == "approval"
+        assert cloned_approval["status"] == "yet_to_start"
+
+    def test_reject_after_multiple_rejections_uses_latest_path(self):
+        """After multiple reject cycles, the latest traversal path is cloned."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed", instance_id="A-v1",
+                                     app_data={"assignee": [{"user_id": "old-author"}], "personas": []}),
+            self._make_step_instance("B", "rejected", instance_id="B-v1"),
+            self._make_step_instance("A", "completed", instance_id="A-v2",
+                                     app_data={"assignee": [{"user_id": "new-author"}], "personas": [],
+                                               "revision_count": 2}),
+            self._make_step_instance("B", "completed", instance_id="B-v2",
+                                     app_data={"assignee": [{"user_id": "reviewer-v2"}], "personas": []}),
+            self._make_step_instance("C", "in_progress", instance_id="C-v1"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[4], workflow["steps"][2], workflow
+        )
+
+        assert steps[4]["status"] == "rejected"
+        cloned_a = steps[5]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "new-author"
+        assert cloned_a["app_data"]["revision_count"] == 2
+        cloned_b = steps[6]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["app_data"]["assignee"][0]["user_id"] == "reviewer-v2"
+
+    def test_reject_to_unvisited_step_falls_back_to_workflow_json(self):
+        """When fail_goto points to a step never visited, falls back to workflow JSON chain."""
+        workflow = self._make_workflow(
+            {"id": "X", "success_goto": "B"},
+            {"id": "B", "success_goto": "NA", "fail_goto": "X"},
+        )
+        steps = [
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[0], workflow["steps"][1], workflow
+        )
+
+        assert steps[0]["status"] == "rejected"
+        cloned_x = steps[1]
+        assert cloned_x["step_id"] == "X"
+        assert cloned_x["status"] == "in_progress"
+        cloned_b = steps[2]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["status"] == "yet_to_start"
+
+    def test_reject_preserves_skipped_step_data_in_default_chain(self):
+        """A previously skipped step's data (e.g. skip_reason) is preserved
+        when it appears in the default chain during rejection."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C"},
+            {"id": "C", "success_goto": "D"},
+            {"id": "D", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed", app_data={
+                "assignee": [{"user_id": "u-a"}], "personas": []}),
+            self._make_step_instance("B", "skipped", app_data={
+                "assignee": [], "personas": [], "skip_reason": "optional"}),
+            self._make_step_instance("C", "completed", app_data={
+                "assignee": [{"user_id": "u-c"}], "personas": []}),
+            self._make_step_instance("D", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[3], workflow["steps"][3], workflow
+        )
+
+        assert len(steps) == 8
+        assert steps[4]["step_id"] == "A"
+        assert steps[4]["status"] == "in_progress"
+        assert steps[5]["step_id"] == "B"
+        assert steps[5]["status"] == "yet_to_start"
+        assert steps[5]["app_data"]["skip_reason"] == "optional"
+        assert steps[6]["step_id"] == "C"
+        assert steps[6]["status"] == "yet_to_start"
+        assert steps[7]["step_id"] == "D"
+        assert steps[7]["status"] == "yet_to_start"
+
+    def test_reject_branching_step_visited_in_earlier_cycle_preserves_data(self):
+        """B was visited in an earlier cycle via the default path, then the user
+        took a branch path (X) in a later cycle.  On rejection, the default chain
+        includes B, and B's accumulated data from its earlier visit is preserved."""
+        workflow = {
+            "steps": [
+                {"step_id": "A", "step_name": "A", "stage_name": "S",
+                 "transitions": {"success_goto": {"default": "B", "branch": "X"}},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "B", "step_name": "B", "stage_name": "S",
+                 "transitions": {"success_goto": "C"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "X", "step_name": "X", "stage_name": "S",
+                 "transitions": {"success_goto": "C"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+                {"step_id": "C", "step_name": "C", "stage_name": "S",
+                 "transitions": {"success_goto": "NA", "fail_goto": "A"},
+                 "actor": {}, "is_optional": False, "sla": {}},
+            ]
+        }
+        b_data = {
+            "assignee": [{"user_id": "b-reviewer", "status": "active"}],
+            "personas": [200], "review_score": 85,
+        }
+        steps = [
+            self._make_step_instance("A", "completed", instance_id="A-v1"),
+            self._make_step_instance("B", "completed", instance_id="B-v1", app_data=b_data),
+            self._make_step_instance("C", "rejected", instance_id="C-v1"),
+            self._make_step_instance("A", "completed", instance_id="A-v2",
+                                     app_data={"assignee": [{"user_id": "author-v2"}], "personas": []}),
+            self._make_step_instance("X", "completed", instance_id="X-v1",
+                                     app_data={"assignee": [{"user_id": "branch-user"}], "personas": []}),
+            self._make_step_instance("C", "in_progress", instance_id="C-v2",
+                                     app_data={"assignee": [{"user_id": "carol-v2"}], "personas": []}),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[5], workflow["steps"][3], workflow
+        )
+
+        assert steps[5]["status"] == "rejected"
+        cloned_a = steps[6]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "author-v2"
+        cloned_b = steps[7]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["status"] == "yet_to_start"
+        assert cloned_b["app_data"]["assignee"][0]["user_id"] == "b-reviewer"
+        assert cloned_b["app_data"]["review_score"] == 85
+        cloned_c = steps[8]
+        assert cloned_c["step_id"] == "C"
+        assert cloned_c["status"] == "yet_to_start"
+        assert cloned_c["app_data"]["assignee"][0]["user_id"] == "carol-v2"
+
+    def test_reject_forward_yet_to_start_step_with_preassigned_user(self):
+        """A yet_to_start forward step (C) has a user pre-assigned via
+        assign_user_to_step_v2 before it was ever reached.  On rejection from B
+        back to A, C's pre-assigned data is preserved in the rebuilt chain."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "C", "fail_goto": "A"},
+            {"id": "C", "success_goto": "NA"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed", app_data={
+                "assignee": [{"user_id": "alice"}], "personas": [1]
+            }),
+            self._make_step_instance("B", "in_progress"),
+            self._make_step_instance("C", "yet_to_start", app_data={
+                "assignee": [
+                    {"user_id": "eve-preassigned", "user_name": "Eve",
+                     "role": "Reviewer", "status": "active",
+                     "assigned_at": "2026-01-15T00:00:00Z", "started_at": None,
+                     "completed_at": None, "unassigned_at": None}
+                ],
+                "personas": [42],
+            }),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        assert steps[1]["status"] == "rejected"
+        assert len(steps) == 5
+        cloned_a = steps[2]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["app_data"]["assignee"][0]["user_id"] == "alice"
+        cloned_b = steps[3]
+        assert cloned_b["step_id"] == "B"
+        assert cloned_b["status"] == "yet_to_start"
+        cloned_c = steps[4]
+        assert cloned_c["step_id"] == "C"
+        assert cloned_c["status"] == "yet_to_start"
+        assert cloned_c["app_data"]["assignee"][0]["user_id"] == "eve-preassigned"
+        assert cloned_c["app_data"]["assignee"][0]["role"] == "Reviewer"
+        assert cloned_c["app_data"]["personas"] == [42]
+
+    def test_reject_cloned_in_progress_step_gets_fresh_assignee_timestamps(self):
+        """The first cloned step (set to in_progress) should have its assignee
+        started_at set to current_time via _set_assignee_timestamps_on_activation,
+        and completed_at should be None.  Stale values from the source must not
+        carry over."""
+        workflow = self._make_workflow(
+            {"id": "A", "success_goto": "B"},
+            {"id": "B", "success_goto": "NA", "fail_goto": "A"},
+        )
+        steps = [
+            self._make_step_instance("A", "completed", app_data={
+                "assignee": [
+                    {"user_id": "u1", "user_name": "Alice", "role": "Lead",
+                     "status": "active",
+                     "assigned_at": "2026-01-01T00:00:00Z",
+                     "started_at": "2026-01-01T01:00:00Z",
+                     "completed_at": "2026-01-02T00:00:00Z",
+                     "unassigned_at": None}
+                ],
+                "personas": [1],
+            }),
+            self._make_step_instance("B", "in_progress"),
+        ]
+        tracker = MagicMock()
+
+        ReportTrackerService._reject(
+            tracker, steps, steps[1], workflow["steps"][1], workflow
+        )
+
+        cloned_a = steps[2]
+        assert cloned_a["step_id"] == "A"
+        assert cloned_a["status"] == "in_progress"
+        assert cloned_a["started_at"] is not None
+
+        alice = cloned_a["app_data"]["assignee"][0]
+        assert alice["user_id"] == "u1"
+        assert alice["assigned_at"] == "2026-01-01T00:00:00Z"
+        assert alice["started_at"] is not None
+        assert alice["started_at"] != "2026-01-01T01:00:00Z"
+        assert alice["completed_at"] is None
+        assert alice["unassigned_at"] is None
+
+        cloned_b = steps[3]
+        assert cloned_b["status"] == "yet_to_start"
+        b_assignees = cloned_b["app_data"].get("assignee", [])
+        for assignee in b_assignees:
+            assert assignee.get("started_at") is None
+            assert assignee.get("completed_at") is None
