@@ -3,8 +3,9 @@ name: Backend Dev - Build & Deploy
 on:
   push:
     branches:
-      - develop
-      - feature/cicd
+      # - develop
+      # - feature/cicd
+      - feature/optimizations-18032026
     paths:
       - 'server/**'
       - '.github/workflows/backend-dev-deploy.yml'
