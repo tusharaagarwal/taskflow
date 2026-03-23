@@ -91,7 +91,7 @@ echo "🚂 Deploying to Railway..."
 
 # Check if railway project exists
 PROJECT_NAME="taskflow"
-if railway projects list | grep -q "$PROJECT_NAME"; then
+if railway list | grep -q "$PROJECT_NAME"; then
     echo -e "${YELLOW}⚠️  Railway project $PROJECT_NAME already exists${NC}"
     echo "   → Will link to existing project (no deletion)"
     RAILWAY_EXISTS=true
@@ -102,7 +102,7 @@ fi
 # Create or link project
 if [ "$RAILWAY_EXISTS" = false ]; then
     echo "Creating Railway project from GitHub repo..."
-    railway projects create --name "$PROJECT_NAME" --github
+    railway init --name "$PROJECT_NAME"
 else
     railway link "$PROJECT_NAME"
 fi
@@ -120,11 +120,8 @@ railway variables set SECRET_KEY "$SECRET_KEY"
 railway variables set DEBUG "false"
 # Railway auto-sets DATABASE_URL when PostgreSQL plugin added
 
-# Add PostgreSQL plugin
-echo "🗄️  Adding PostgreSQL database..."
-if ! railway plugins ls | grep -q "postgresql"; then
-    railway plugins add postgresql
-fi
+# PostgreSQL is auto-provisioned from railway.json
+echo "🗄️  PostgreSQL will be auto-provisioned from railway.json"
 
 # Wait for deploy
 echo "⏳ Triggering deployment..."
