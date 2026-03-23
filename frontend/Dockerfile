@@ -3,6 +3,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
+
+# Accept build-time API URL — Railway injects VITE_API_BASE as a build arg
+ARG VITE_API_BASE=https://backend-production-701b.up.railway.app/api/v1
+ENV VITE_API_BASE=$VITE_API_BASE
+
 RUN npm run build
 
 FROM nginx:alpine
