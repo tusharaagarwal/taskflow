@@ -11,11 +11,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including netcat for DB wait
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     gcc \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
