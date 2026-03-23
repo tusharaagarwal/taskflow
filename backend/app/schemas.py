@@ -41,7 +41,7 @@ class TokenData(BaseModel):
 class TaskBase(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = Field(None, max_length=2000)
-    status: str = Field("todo", regex="^(todo|in_progress|done|archived)$")
+    status: str = Field("todo", pattern="^(todo|in_progress|done|archived)$")
     priority: int = Field(2, ge=1, le=3)
     due_date: Optional[datetime] = None
 
@@ -52,7 +52,7 @@ class TaskCreate(TaskBase):
 
 class TaskUpdate(TaskBase):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
-    status: Optional[str] = Field(None, regex="^(todo|in_progress|done|archived)$")
+    status: Optional[str] = Field(None, pattern="^(todo|in_progress|done|archived)$")
     priority: Optional[int] = Field(None, ge=1, le=3)
     due_date: Optional[datetime] = None
 

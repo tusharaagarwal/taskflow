@@ -4,10 +4,14 @@ from sqlalchemy.pool import NullPool
 from app.config import settings
 
 # Async engine
+_db_url = settings.DATABASE_URL
+if _db_url.startswith("postgresql://"):
+    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
 engine = create_async_engine(
-    settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
+    _db_url,
     echo=settings.DB_ECHO,
-    poolclass=NullPool if settings.DEBUG else None,
+    poolclass=NullPool,
 )
 
 # Async session factory

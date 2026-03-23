@@ -46,13 +46,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Rate limiting middleware
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    response = await limiter(request)
-    return response
-
-
 # Global exception handler
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):

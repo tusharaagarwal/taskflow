@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from 'react-query'
+import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000/api/v1'
