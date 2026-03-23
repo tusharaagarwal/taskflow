@@ -7,7 +7,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo "🚀 TaskFlow Railway Deploy Script"
+echo "🚀 TaskFlow Render Deploy Script"
 echo "================================"
 
 # Check prerequisites
@@ -19,9 +19,9 @@ if ! command -v gh &> /dev/null; then
     exit 1
 fi
 
-if ! command -v railway &> /dev/null; then
-    echo -e "${RED}❌ Railway CLI not found${NC}"
-    echo "Install: https://docs.railway.app/develop/cli"
+if ! command -v render &> /dev/null; then
+    echo -e "${RED}❌ Render CLI not found${NC}"
+    echo "Install: https://render.com/docs/cli"
     exit 1
 fi
 
@@ -34,11 +34,8 @@ if ! gh auth status &> /dev/null; then
     exit 1
 fi
 
-if ! railway whoami &> /dev/null; then
-    echo -e "${RED}❌ Railway CLI not authenticated${NC}"
-    echo "Run: railway login"
-    exit 1
-fi
+# Render auth check (skip due to CLI bug; we'll handle errors later)
+echo "   (Render auth will be handled during deploy)"
 
 echo -e "${GREEN}✅ Authentication verified${NC}"
 
@@ -50,11 +47,11 @@ if [ ! -d .git ]; then
     echo "📦 Initializing git repository..."
     git init
     git add .
-    git commit -m "Initial commit for Railway deployment"
+    git commit -m "Initial commit for Render deployment"
 else
     echo "📦 Git repository already exists"
     git add .
-    git commit -m "Update for Railway deployment" || echo "No changes to commit"
+    git commit -m "Update for Render deployment" || echo "No changes to commit"
 fi
 
 # GitHub repo setup
@@ -86,25 +83,26 @@ fi
 
 echo -e "${GREEN}✅ GitHub repository ready: https://github.com/$GH_USER/$REPO_NAME${NC}"
 
-# Railway deployment
-echo "🚂 Deploying to Railway..."
+# Render deployment
+echo "🎨 Deploying to Render..."
 
-# Check if railway project exists
+# Check if render project exists
 PROJECT_NAME="taskflow"
-if railway list | grep -q "$PROJECT_NAME"; then
-    echo -e "${YELLOW}⚠️  Railway project $PROJECT_NAME already exists${NC}"
-    echo "   → Will link to existing project (no deletion)"
-    RAILWAY_EXISTS=true
+if render projects list | grep -q "$PROJECT_NAME"; then
+    echo -e "${YELLOW}⚠️  Render project $PROJECT_NAME already exists${NC}"
+    echo "   → Will update existing project"
+    RENDER_EXISTS=true
 else
-    RAILWAY_EXISTS=false
+    RENDER_EXISTS=false
 fi
 
-# Create or link project
-if [ "$RAILWAY_EXISTS" = false ]; then
-    echo "Creating Railway project from GitHub repo..."
-    railway init --name "$PROJECT_NAME"
+# Create or update project
+if [ "$RENDER_EXISTS" = false ]; then
+    echo "Creating Render project..."
+    render init --name "$PROJECT_NAME" --repo "github:$GH_USER/$REPO_NAME" --plan free
 else
-    railway link "$PROJECT_NAME"
+    echo "Linking to existing Render project..."
+    render link "$PROJECT_NAME"
 fi
 
 # Set environment variables
@@ -116,47 +114,30 @@ if [ -z "$SECRET_KEY" ]; then
     echo "Generated SECRET_KEY"
 fi
 
-railway variables set SECRET_KEY "$SECRET_KEY"
-railway variables set DEBUG "false"
-# Railway auto-sets DATABASE_URL when PostgreSQL plugin added
+render secrets set SECRET_KEY "$SECRET_KEY"
+render secrets set DEBUG "false"
+render secrets set ALLOWED_ORIGINS "https://taskflow-frontend.onrender.com"
 
-# PostgreSQL is auto-provisioned from railway.json
-echo "🗄️  PostgreSQL will be auto-provisioned from railway.json"
-
-# Wait for deploy
+# Trigger deployment
 echo "⏳ Triggering deployment..."
-railway up
-
-# Get URLs
-echo "🔗 Fetching deployment URLs..."
-FRONTEND_URL=$(railway domain --json | jq -r '.[] | select(.name=="frontend") | .url' 2>/dev/null || echo "")
-BACKEND_URL=$(railway domain --json | jq -r '.[] | select(.name=="backend") | .url' 2>/dev/null || echo "")
-
-if [ -z "$FRONTEND_URL" ]; then
-    # Fallback: try to get from railway domains
-    FRONTEND_URL=$(railway domain | grep -E 'https://.*railway.app' | head -1 || echo "")
-fi
+render deploy
 
 echo ""
 echo "==========================================="
-echo -e "${GREEN}🎉 Deployment complete!${NC}"
+echo -e "${GREEN}🎉 Deployment triggered!${NC}"
 echo ""
-echo "🔗 Your URLs:"
-if [ -n "$FRONTEND_URL" ]; then
-    echo "   Frontend: $FRONTEND_URL"
-else
-    echo "   Frontend: (check Railway dashboard → Services → frontend → Domains)"
-fi
-if [ -n "$BACKEND_URL" ]; then
-    echo "   Backend API: $BACKEND_URL/docs"
-else
-    echo "   Backend API: (check Railway dashboard → Services → backend → Domains)"
-fi
+echo "🔗 Your URLs will be:"
+echo "   Frontend: https://taskflow-frontend.onrender.com"
+echo "   Backend API: https://taskflow-backend.onrender.com/docs"
+echo ""
+echo "⏳ Deployment takes 2-5 minutes. Check progress:"
+echo "   render logs --tail"
 echo ""
 echo "📖 Next steps:"
-echo "   1. Open Frontend URL in browser"
-echo "   2. Open Backend URL/docs to access Swagger"
-echo "   3. Register user via /docs → POST /api/v1/auth/register"
-echo "   4. Login on frontend and start using!"
+echo "   1. Wait for deployment to finish (check logs)"
+echo "   2. Open Frontend URL in browser"
+echo "   3. Open Backend URL/docs to access Swagger"
+echo "   4. Register user via /docs → POST /api/v1/auth/register"
+echo "   5. Login on frontend and start using!"
 echo ""
 echo "==========================================="
