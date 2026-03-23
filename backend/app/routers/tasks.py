@@ -8,7 +8,7 @@ from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.routers.auth import get_current_user
 from app.models import User
 
-router = APIRouter(prefix="/tasks", tags=["Tasks"])
+router = APIRouter(tags=["Tasks"])
 
 
 @router.get("/", response_model=List[TaskResponse])

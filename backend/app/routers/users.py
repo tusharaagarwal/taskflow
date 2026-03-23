@@ -6,7 +6,7 @@ from app.models import User
 from app.schemas import UserUpdate, UserResponse
 from app.routers.auth import get_current_user
 
-router = APIRouter(prefix="/users", tags=["Users"])
+router = APIRouter(tags=["Users"])
 
 
 @router.get("/me", response_model=UserResponse)
