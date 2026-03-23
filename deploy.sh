@@ -67,13 +67,7 @@ REPO_NAME="taskflow"
 # Check if repo exists
 if gh repo view "$GH_USER/$REPO_NAME" &> /dev/null; then
     echo -e "${YELLOW}⚠️  Repo $REPO_NAME already exists${NC}"
-    read -p "Delete and recreate? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        gh repo delete "$GH_USER/$REPO_NAME" --yes
-    else
-        echo "Using existing repo..."
-    fi
+    echo "   → Will push to existing repo (no deletion)"
 fi
 
 # Create repo if not exists
@@ -97,13 +91,7 @@ echo "🚂 Deploying to Railway..."
 PROJECT_NAME="taskflow"
 if railway ls | grep -q "$PROJECT_NAME"; then
     echo -e "${YELLOW}⚠️  Railway project $PROJECT_NAME already exists${NC}"
-    read -p "Delete and recreate? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        railway rm "$PROJECT_NAME" --yes
-    else
-        echo "Using existing project..."
-    fi
+    echo "   → Will link to existing project (no deletion)"
 fi
 
 # Create or link project
