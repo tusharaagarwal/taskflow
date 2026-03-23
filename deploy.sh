@@ -91,15 +91,18 @@ echo "🚂 Deploying to Railway..."
 
 # Check if railway project exists
 PROJECT_NAME="taskflow"
-if railway ls | grep -q "$PROJECT_NAME"; then
+if railway projects list | grep -q "$PROJECT_NAME"; then
     echo -e "${YELLOW}⚠️  Railway project $PROJECT_NAME already exists${NC}"
     echo "   → Will link to existing project (no deletion)"
+    RAILWAY_EXISTS=true
+else
+    RAILWAY_EXISTS=false
 fi
 
 # Create or link project
-if ! railway ls | grep -q "$PROJECT_NAME"; then
+if [ "$RAILWAY_EXISTS" = false ]; then
     echo "Creating Railway project from GitHub repo..."
-    railway link --create "$PROJECT_NAME"
+    railway projects create --name "$PROJECT_NAME" --github
 else
     railway link "$PROJECT_NAME"
 fi
