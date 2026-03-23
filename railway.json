@@ -1,0 +1,52 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "description": "TaskFlow Full-Stack Application",
+  "services": [
+    {
+      "name": "postgres",
+      "type": "postgres",
+      "plan": "shared-cpu-2x",
+      "database": "taskflow",
+      "envVars": {
+        "POSTGRES_USER": "postgres",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "POSTGRES_DB": "taskflow"
+      }
+    },
+    {
+      "name": "backend",
+      "type": "web",
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "backend/Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT",
+        "healthcheckPath": "/health"
+      },
+      "envVars": {
+        "DATABASE_URL": "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/taskflow",
+        "DEBUG": "false",
+        "ALLOWED_ORIGINS": "https://${FRONTEND_URL}",
+        "SECRET_KEY": "${SECRET_KEY}",
+        "PYTHON_VERSION": "3.11"
+      },
+      "dependsOn": ["postgres"]
+    },
+    {
+      "name": "frontend",
+      "type": "web",
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "frontend/Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "nginx -g 'daemon off;'"
+      },
+      "envVars": {
+        "VITE_API_BASE": "https://${BACKEND_URL}/api/v1"
+      },
+      "dependsOn": ["backend"]
+    }
+  ]
+}
