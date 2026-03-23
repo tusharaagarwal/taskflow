@@ -5,7 +5,7 @@
     {
       "name": "postgres",
       "type": "postgres",
-      "plan": "shared-cpu-2x",
+      "plan": "shared-cpu",
       "database": "taskflow",
       "envVars": {
         "POSTGRES_USER": "postgres",
@@ -17,35 +17,44 @@
       "name": "backend",
       "type": "web",
       "build": {
-        "builder": "DOCKERFILE",
-        "dockerfilePath": "backend/Dockerfile"
+        "builder": "dockerfile",
+        "dockerfilePath": "Dockerfile"
       },
       "deploy": {
         "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT",
-        "healthcheckPath": "/health"
+        "healthcheckPath": "/health",
+        "restartPolicy": {
+          "type": "ON_FAILURE",
+          "maxAttempts": 3
+        }
       },
       "envVars": {
-        "DATABASE_URL": "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/taskflow",
+        "SECRET_KEY": "${SECRET_KEY}",
         "DEBUG": "false",
         "ALLOWED_ORIGINS": "https://${FRONTEND_URL}",
-        "SECRET_KEY": "${SECRET_KEY}",
-        "PYTHON_VERSION": "3.11"
+        "DATABASE_URL": "postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/taskflow"
       },
+      "rootDir": "backend",
       "dependsOn": ["postgres"]
     },
     {
       "name": "frontend",
       "type": "web",
       "build": {
-        "builder": "DOCKERFILE",
-        "dockerfilePath": "frontend/Dockerfile"
+        "builder": "dockerfile",
+        "dockerfilePath": "Dockerfile"
       },
       "deploy": {
-        "startCommand": "nginx -g 'daemon off;'"
+        "startCommand": "nginx -g 'daemon off;'",
+        "restartPolicy": {
+          "type": "ON_FAILURE",
+          "maxAttempts": 3
+        }
       },
       "envVars": {
         "VITE_API_BASE": "https://${BACKEND_URL}/api/v1"
       },
+      "rootDir": "frontend",
       "dependsOn": ["backend"]
     }
   ]
