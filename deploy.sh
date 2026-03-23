@@ -79,7 +79,9 @@ else
     if ! git remote get-url origin &> /dev/null; then
         git remote add origin "https://github.com/$GH_USER/$REPO_NAME.git"
     fi
-    git push -u origin main
+    # Push current branch (could be master or main)
+    CURRENT_BRANCH=$(git branch --show-current)
+    git push -u origin "$CURRENT_BRANCH"
 fi
 
 echo -e "${GREEN}✅ GitHub repository ready: https://github.com/$GH_USER/$REPO_NAME${NC}"
