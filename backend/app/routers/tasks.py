@@ -38,23 +38,24 @@ async def create_task(
 ):
     """Create a new task using raw SQL"""
     try:
-        # Use raw SQL INSERT
-        result = await db.execute(
-            text("""
-                INSERT INTO tasks (title, description, status, priority, owner_id, created_at, updated_at) 
-                VALUES (:title, :desc, :status, :priority, :owner_id, NOW(), NOW())
-                RETURNING id, title, description, status, priority, owner_id, created_at, updated_at
-            """),
+        # Try simple INSERT first
+        await db.execute(
+            text("INSERT INTO tasks (title, status, priority, owner_id) VALUES (:title, :status, :priority, :owner_id)"),
             {
                 "title": task_data.title,
-                "desc": task_data.description,
                 "status": task_data.status,
                 "priority": task_data.priority,
                 "owner_id": current_user.id
             }
         )
-        row = result.fetchone()
         await db.commit()
+        
+        # Now fetch the created task
+        result = await db.execute(
+            text("SELECT id, title, description, status, priority, owner_id, created_at, updated_at FROM tasks WHERE owner_id = :owner_id ORDER BY id DESC LIMIT 1"),
+            {"owner_id": current_user.id}
+        )
+        row = result.fetchone()
         
         return {
             "id": row[0],
