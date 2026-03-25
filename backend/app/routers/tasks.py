@@ -35,11 +35,21 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new task"""
-    task = Task(**task_data.model_dump(), owner_id=current_user.id)
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-    return task
+    try:
+        print(f"Creating task: {task_data}")
+        print(f"Current user: {current_user.id}")
+        task = Task(**task_data.model_dump(), owner_id=current_user.id)
+        print(f"Task object: {task}")
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        print(f"Task created successfully: {task.id}")
+        return task
+    except Exception as e:
+        print(f"Error creating task: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
