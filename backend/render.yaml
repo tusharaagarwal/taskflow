@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: taskflow-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash scripts/entrypoint.sh
+    healthCheckPath: /health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: false
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: taskflow-db
+          envVarName: DATABASE_URL
+
+databases:
+  - name: taskflow-db
+    databaseName: taskflow
+    plan: free
+    ipAllowList: []
