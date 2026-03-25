@@ -61,7 +61,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     logger.error(f"General Error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": str(exc)},
+        content={"detail": f"{type(exc).__name__}: {str(exc)}"},
     )
 
 
