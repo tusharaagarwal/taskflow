@@ -16,9 +16,11 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events"""
     # Startup
     print("🚀 TaskFlow API starting...")
-    # Create tables if they don't exist
+    # Drop and recreate tables for fresh schema (development mode)
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
+        print("✅ Database tables recreated")
     yield
     # Shutdown
     print("🛑 TaskFlow API shutting down...")
