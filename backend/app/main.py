@@ -16,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine, Base, get_db
 from app.routers import auth, tasks, users
 from app.middleware.rate_limit import limiter, setup_middleware
 
