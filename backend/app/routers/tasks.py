@@ -38,6 +38,13 @@ async def create_task(
 ):
     """Create a new task using ORM like user update does"""
     try:
+        with open('/tmp/task_creation.log', 'a') as f:
+            f.write(f"\n=== Creating task ===\n")
+            f.write(f"User ID: {current_user.id}\n")
+            f.write(f"Title: {task_data.title}\n")
+            f.write(f"Status: {task_data.status}\n")
+            f.write(f"Priority: {task_data.priority}\n")
+
         # Create task object like user update does
         task = Task(
             title=task_data.title,
@@ -46,11 +53,27 @@ async def create_task(
             priority=task_data.priority,
             owner_id=current_user.id
         )
+
+        with open('/tmp/task_creation.log', 'a') as f:
+            f.write(f"Task object created: {task}\n")
+
         db.add(task)
         await db.commit()
         await db.refresh(task)
+
+        with open('/tmp/task_creation.log', 'a') as f:
+            f.write(f"Task created successfully: {task.id}\n")
+
         return task
     except Exception as e:
+        error_details = f"\n=== ERROR CREATING TASK ===\n"
+        error_details += f"Error type: {type(e).__name__}\n"
+        error_details += f"Error message: {str(e)}\n"
+        error_details += f"Traceback:\n{traceback.format_exc()}\n"
+
+        with open('/tmp/task_creation.log', 'a') as f:
+            f.write(error_details)
+
         logger.error(f"Create task error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
