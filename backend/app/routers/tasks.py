@@ -36,38 +36,20 @@ async def create_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new task using raw SQL"""
+    """Create a new task using ORM like user update does"""
     try:
-        # Try simple INSERT first
-        await db.execute(
-            text("INSERT INTO tasks (title, status, priority, owner_id) VALUES (:title, :status, :priority, :owner_id)"),
-            {
-                "title": task_data.title,
-                "status": task_data.status,
-                "priority": task_data.priority,
-                "owner_id": current_user.id
-            }
+        # Create task object like user update does
+        task = Task(
+            title=task_data.title,
+            description=task_data.description or None,
+            status=task_data.status,
+            priority=task_data.priority,
+            owner_id=current_user.id
         )
+        db.add(task)
         await db.commit()
-        
-        # Now fetch the created task
-        result = await db.execute(
-            text("SELECT id, title, description, status, priority, owner_id, created_at, updated_at FROM tasks WHERE owner_id = :owner_id ORDER BY id DESC LIMIT 1"),
-            {"owner_id": current_user.id}
-        )
-        row = result.fetchone()
-        
-        return {
-            "id": row[0],
-            "title": row[1],
-            "description": row[2],
-            "status": row[3],
-            "priority": row[4],
-            "owner_id": row[5],
-            "created_at": row[6],
-            "updated_at": row[7],
-            "due_date": None
-        }
+        await db.refresh(task)
+        return task
     except Exception as e:
         logger.error(f"Create task error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
