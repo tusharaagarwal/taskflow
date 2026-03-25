@@ -58,18 +58,10 @@ app.add_middleware(
 # Global exception handler
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    import traceback
     logger.error(f"General Error: {exc}", exc_info=True)
-    error_details = {
-        "error_type": type(exc).__name__,
-        "error_message": str(exc),
-        "traceback": traceback.format_exc(),
-        "path": str(request.url.path),
-        "method": request.method
-    }
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content=error_details,
+        content={"detail": str(exc)},
     )
 
 
