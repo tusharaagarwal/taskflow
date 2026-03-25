@@ -1,13 +1,14 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, text, create_engine, MetaData
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
 from app.database import get_db
 from app.models import Task, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.routers.auth import get_current_user
 from app.models import User
 import logging
+import asyncio
 
 router = APIRouter(tags=["Tasks"])
 logger = logging.getLogger(__name__)
@@ -40,13 +41,8 @@ async def create_task(
 ):
     """Create a new task using ORM like user update does"""
     try:
-        # Test database connection first
+        # Test database connection
         result = await db.execute(text("SELECT 1"))
-        print(f"DB connection test: SUCCESS", flush=True)
-
-        # Now try to create a task
-        print(f"Creating task for user {current_user.id}", flush=True)
-        print(f"Task data: {task_data}", flush=True)
 
         # Create task object
         task = Task(
@@ -57,27 +53,22 @@ async def create_task(
             owner_id=current_user.id
         )
 
-        print(f"Task object created: {task}", flush=True)
-
         db.add(task)
-        print(f"Task added to session", flush=True)
-
         await db.commit()
-        print(f"Commit successful", flush=True)
-
         await db.refresh(task)
-        print(f"Task refreshed: {task.id}", flush=True)
 
         return task
     except Exception as e:
-        print(f"ERROR CREATING TASK", flush=True)
-        print(f"Error type: {type(e).__name__}", flush=True)
-        print(f"Error message: {str(e)}", flush=True)
+        # Return full error details including traceback
         import traceback
-        print(f"Traceback:\n{traceback.format_exc()}", flush=True)
-
-        logger.error(f"Create task error: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_info = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc(),
+            "user_id": current_user.id if current_user else None,
+            "task_data": task_data.model_dump() if task_data else None
+        }
+        raise HTTPException(status_code=500, detail=error_info)
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
