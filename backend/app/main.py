@@ -49,6 +49,9 @@ app.add_middleware(
 # Global exception handler
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    import traceback
+    print(f"SQLAlchemy Error: {exc}")
+    print(f"Traceback: {traceback.format_exc()}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Database error occurred"},
