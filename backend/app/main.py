@@ -57,12 +57,12 @@ app.add_middleware(
 )
 
 # Global exception handler
-@app.exception_handler(SQLAlchemyError)
-async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    logger.error(f"SQLAlchemy Error: {exc}", exc_info=True)
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"General Error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": f"Database error: {str(exc)}"},
+        content={"detail": f"Error: {str(exc)}"},
     )
 
 
