@@ -1,0 +1,13 @@
+frontend/
+*.md
+.env
+.env.example
+docker-compose.yml
+render.yaml
+deploy.sh
+quick-deploy.sh
+DEPLOY*.md
+README.md
+.git
+.gitignore
+.railwayignore
