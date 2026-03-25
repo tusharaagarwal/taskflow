@@ -33,7 +33,7 @@ class Task(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(500), nullable=False)
     description = Column(Text)
-    status = Column(SQLAEnum(TaskStatus), default=TaskStatus.TODO, nullable=False)
+    status = Column(String(50), default="todo", nullable=False)
     priority = Column(Integer, default=2)  # 1: High, 2: Medium, 3: Low
     due_date = Column(DateTime, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
