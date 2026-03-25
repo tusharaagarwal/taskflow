@@ -1,14 +1,13 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, text, create_engine, MetaData
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, text
 from app.database import get_db
 from app.models import Task, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.routers.auth import get_current_user
 from app.models import User
 import logging
-import asyncio
 
 router = APIRouter(tags=["Tasks"])
 logger = logging.getLogger(__name__)
