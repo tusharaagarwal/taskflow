@@ -74,6 +74,17 @@ async def health_check():
         "service": "taskflow-api"
     }
 
+# Test database connection
+@app.get("/test-db", tags=["Debug"])
+async def test_db(db: AsyncSession = Depends(get_db)):
+    """Test database connection"""
+    try:
+        result = await db.execute("SELECT 1 as test")
+        row = result.fetchone()
+        return {"db_status": "ok", "test_result": row[0]}
+    except Exception as e:
+        return {"db_status": "error", "error": str(e)}
+
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
