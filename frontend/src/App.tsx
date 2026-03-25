@@ -1,22 +1,8 @@
 import { useState, useEffect } from 'react'
-import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import axios from 'axios'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'https://backend-production-701b.up.railway.app/api/v1'
 
-const queryClient = new QueryClient()
-
-const api = axios.create({
-  baseURL: API_BASE,
-})
-
-// Types
-interface User {
-  id: number
-  email: string
-  full_name: string | null
-  is_active: boolean
-}
+console.log('API_BASE:', API_BASE)
 
 interface Task {
   id: number
@@ -34,20 +20,34 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setLoading(true)
     try {
-      const res = await api.post('/auth/login', new URLSearchParams({
-        username: email,
-        password,
-      }))
-      const token = res.data.access_token
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          username: email,
+          password,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.detail || 'Login failed')
+      }
+      const token = data.access_token
       localStorage.setItem('token', token)
       onLogin(token)
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Login failed')
+      setError(err.message || 'Login failed')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -78,9 +78,10 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
         </div>
         <button
           type="submit"
-          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+          disabled={loading}
+          className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition disabled:opacity-50"
         >
-          Login
+          {loading ? 'Logging in...' : 'Login'}
         </button>
         <p className="text-xs text-gray-500 text-center">Don't have an account? Register via API docs: /docs</p>
       </form>
@@ -88,70 +89,100 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
   )
 }
 
-function TaskList() {
+function TaskList({ onLogout }: { onLogout: () => void }) {
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [newTaskTitle, setNewTaskTitle] = useState('')
-  const queryClient = useQueryClient()
+  const [saving, setSaving] = useState(false)
 
-  const { data: tasks, isLoading, error } = useQuery<Task[], Error>(
-    'tasks',
-    async () => {
-      const res = await api.get('/tasks/')
-      return res.data
-    }
-  )
+  const token = localStorage.getItem('token')
 
-  const createMutation = useMutation(
-    async (title: string) => {
-      const res = await api.post('/tasks/', { title, status: 'todo' })
-      return res.data
-    },
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('tasks')
-      }
-    }
-  )
+  useEffect(() => {
+    fetchTasks()
+  }, [])
 
-  const updateMutation = useMutation(
-    async ({ id, updates }: { id: number; updates: Partial<Task> }) => {
-      const res = await api.put(`/tasks/${id}`, updates)
-      return res.data
-    },
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('tasks')
-      }
+  const fetchTasks = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/tasks/`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      if (!res.ok) throw new Error('Failed to fetch tasks')
+      const data = await res.json()
+      setTasks(data)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-  )
+  }
 
-  const deleteMutation = useMutation(
-    async (id: number) => {
-      await api.delete(`/tasks/${id}`)
-    },
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries('tasks')
-      }
+  const createTask = async (title: string) => {
+    setSaving(true)
+    try {
+      const res = await fetch(`${API_BASE}/tasks/`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title, status: 'todo' }),
+      })
+      if (!res.ok) throw new Error('Failed to create task')
+      await fetchTasks()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
     }
-  )
+  }
 
   const handleAddTask = (e: React.FormEvent) => {
     e.preventDefault()
     if (newTaskTitle.trim()) {
-      createMutation.mutate(newTaskTitle)
+      createTask(newTaskTitle)
       setNewTaskTitle('')
     }
   }
 
-  const cycleStatus = (task: Task) => {
+  const cycleStatus = async (task: Task) => {
     const statusOrder: Task['status'][] = ['todo', 'in_progress', 'done', 'archived']
     const currentIndex = statusOrder.indexOf(task.status)
     const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length]
-    updateMutation.mutate({ id: task.id, updates: { status: nextStatus } })
+    
+    try {
+      await fetch(`${API_BASE}/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: nextStatus }),
+      })
+      await fetchTasks()
+    } catch (err: any) {
+      setError(err.message)
+    }
   }
 
-  if (isLoading) return <div className="p-8 text-center">Loading tasks...</div>
-  if (error) return <div className="p-8 text-center text-red-500">Error loading tasks: {error.message}</div>
+  const deleteTask = async (id: number) => {
+    try {
+      await fetch(`${API_BASE}/tasks/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      })
+      await fetchTasks()
+    } catch (err: any) {
+      setError(err.message)
+    }
+  }
+
+  if (loading) return <div className="p-8 text-center">Loading tasks...</div>
+  if (error) return <div className="p-8 text-center text-red-500">Error: {error}</div>
 
   const tasksByStatus = {
     todo: tasks?.filter(t => t.status === 'todo') || [],
@@ -163,7 +194,15 @@ function TaskList() {
   return (
     <div className="min-h-screen bg-gray-50 p-8">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6">TaskFlow Dashboard</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">TaskFlow Dashboard</h1>
+          <button
+            onClick={onLogout}
+            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+          >
+            Logout
+          </button>
+        </div>
 
         <form onSubmit={handleAddTask} className="bg-white p-6 rounded-lg shadow mb-8 flex gap-2">
           <input
@@ -175,10 +214,10 @@ function TaskList() {
           />
           <button
             type="submit"
-            disabled={createMutation.isLoading}
+            disabled={saving}
             className="bg-blue-600 text-white px-6 py-3 rounded hover:bg-blue-700 transition disabled:opacity-50"
           >
-            Add
+            {saving ? 'Adding...' : 'Add'}
           </button>
         </form>
 
@@ -208,12 +247,11 @@ function TaskList() {
                       <button
                         onClick={() => cycleStatus(task)}
                         className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded hover:bg-blue-200 transition"
-                        title="Change status"
                       >
                         Cycle: {task.status.replace('_', ' ')}
                       </button>
                       <button
-                        onClick={() => deleteMutation.mutate(task.id)}
+                        onClick={() => deleteTask(task.id)}
                         className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200 transition"
                       >
                         Delete
@@ -236,19 +274,17 @@ function TaskList() {
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'))
 
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    setToken(null)
+  }
+
+  // Debug: Log token status
   useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
-    } else {
-      delete api.defaults.headers.common['Authorization']
-    }
+    console.log('Token present:', !!token)
   }, [token])
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      {token ? <TaskList /> : <Login onLogin={setToken} />}
-    </QueryClientProvider>
-  )
+  return token ? <TaskList onLogout={handleLogout} /> : <Login onLogin={setToken} />
 }
 
 export default App
