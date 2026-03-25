@@ -6,9 +6,9 @@ from fastapi.responses import JSONResponse
 import time
 from sqlalchemy.exc import SQLAlchemyError
 
-# Set up logging
+# Set up logging with DEBUG level for detailed output
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
