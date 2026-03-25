@@ -12,6 +12,8 @@ import logging
 router = APIRouter(tags=["Tasks"])
 logger = logging.getLogger(__name__)
 
+print("=== TASKS ROUTER LOADED ===", flush=True)
+
 
 @router.get("/", response_model=List[TaskResponse])
 async def list_tasks(
