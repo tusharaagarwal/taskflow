@@ -1,12 +1,13 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from app.database import get_db
 from app.models import Task, TaskStatus
 from app.schemas import TaskCreate, TaskUpdate, TaskResponse
 from app.routers.auth import get_current_user
 from app.models import User
+import logging
 
 router = APIRouter(tags=["Tasks"])
 logger = logging.getLogger(__name__)
@@ -21,15 +22,12 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
 ):
     """List tasks for current user with optional status filter"""
-    logger.info(f"Listing tasks for user {current_user.id}")
     query = select(Task).where(Task.owner_id == current_user.id)
     if status_filter:
         query = query.where(Task.status == status_filter)
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
-    tasks = result.scalars().all()
-    logger.info(f"Found {len(tasks)} tasks")
-    return tasks
+    return result.scalars().all()
 
 
 @router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -38,50 +36,39 @@ async def create_task(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new task"""
-@router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
-async def create_task(
-    task_data: TaskCreate,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a new task"""
-    import sys
-    print(f"DEBUG: Creating task for user {current_user.id}", flush=True)
-    sys.stdout.flush()
+    """Create a new task using raw SQL"""
     try:
-        # Create task with explicit fields
-        task = Task(
-            title=task_data.title,
-            description=task_data.description,
-            status=task_data.status,
-            priority=task_data.priority,
-            due_date=task_data.due_date,
-            owner_id=current_user.id
+        # Use raw SQL INSERT
+        result = await db.execute(
+            text("""
+                INSERT INTO tasks (title, description, status, priority, owner_id, created_at, updated_at) 
+                VALUES (:title, :desc, :status, :priority, :owner_id, NOW(), NOW())
+                RETURNING id, title, description, status, priority, owner_id, created_at, updated_at
+            """),
+            {
+                "title": task_data.title,
+                "desc": task_data.description,
+                "status": task_data.status,
+                "priority": task_data.priority,
+                "owner_id": current_user.id
+            }
         )
-        
-        print(f"DEBUG: Task object created: {task}", flush=True)
-        sys.stdout.flush()
-        
-        db.add(task)
-        
-        print(f"DEBUG: About to commit", flush=True)
-        sys.stdout.flush()
-        
+        row = result.fetchone()
         await db.commit()
         
-        print(f"DEBUG: Commit successful", flush=True)
-        sys.stdout.flush()
-        
-        await db.refresh(task)
-        
-        print(f"DEBUG: Task created: {task.id}", flush=True)
-        sys.stdout.flush()
-        
-        return task
+        return {
+            "id": row[0],
+            "title": row[1],
+            "description": row[2],
+            "status": row[3],
+            "priority": row[4],
+            "owner_id": row[5],
+            "created_at": row[6],
+            "updated_at": row[7],
+            "due_date": None
+        }
     except Exception as e:
-        print(f"DEBUG ERROR: {type(e).__name__}: {e}", flush=True)
-        sys.stdout.flush()
+        logger.error(f"Create task error: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
