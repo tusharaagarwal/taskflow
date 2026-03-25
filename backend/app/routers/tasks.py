@@ -40,13 +40,15 @@ async def create_task(
 ):
     """Create a new task using ORM like user update does"""
     try:
-        print(f"=== CREATING TASK ===", flush=True)
-        print(f"User ID: {current_user.id}", flush=True)
-        print(f"Title: {task_data.title}", flush=True)
-        print(f"Status: {task_data.status}", flush=True)
-        print(f"Priority: {task_data.priority}", flush=True)
+        # Test database connection first
+        result = await db.execute(text("SELECT 1"))
+        print(f"DB connection test: SUCCESS", flush=True)
 
-        # Create task object like user update does
+        # Now try to create a task
+        print(f"Creating task for user {current_user.id}", flush=True)
+        print(f"Task data: {task_data}", flush=True)
+
+        # Create task object
         task = Task(
             title=task_data.title,
             description=task_data.description or None,
@@ -58,13 +60,17 @@ async def create_task(
         print(f"Task object created: {task}", flush=True)
 
         db.add(task)
-        await db.commit()
-        await db.refresh(task)
+        print(f"Task added to session", flush=True)
 
-        print(f"Task created successfully: {task.id}", flush=True)
+        await db.commit()
+        print(f"Commit successful", flush=True)
+
+        await db.refresh(task)
+        print(f"Task refreshed: {task.id}", flush=True)
+
         return task
     except Exception as e:
-        print(f"=== ERROR CREATING TASK ===", flush=True)
+        print(f"ERROR CREATING TASK", flush=True)
         print(f"Error type: {type(e).__name__}", flush=True)
         print(f"Error message: {str(e)}", flush=True)
         import traceback
