@@ -36,20 +36,24 @@ async def create_task(
 ):
     """Create a new task"""
     try:
-        print(f"Creating task: {task_data}")
-        print(f"Current user: {current_user.id}")
-        task = Task(**task_data.model_dump(), owner_id=current_user.id)
-        print(f"Task object: {task}")
+        # Create task with explicit fields
+        task = Task(
+            title=task_data.title,
+            description=task_data.description,
+            status=task_data.status,
+            priority=task_data.priority,
+            due_date=task_data.due_date,
+            owner_id=current_user.id
+        )
         db.add(task)
         await db.commit()
         await db.refresh(task)
-        print(f"Task created successfully: {task.id}")
         return task
     except Exception as e:
         print(f"Error creating task: {e}")
         import traceback
         traceback.print_exc()
-        raise
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
