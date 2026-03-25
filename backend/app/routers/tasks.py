@@ -39,12 +39,17 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new task"""
+@router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+async def create_task(
+    task_data: TaskCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a new task"""
+    import sys
+    print(f"DEBUG: Creating task for user {current_user.id}", flush=True)
+    sys.stdout.flush()
     try:
-        logger.info(f"===== CREATING TASK =====")
-        logger.info(f"Request data: {task_data}")
-        logger.info(f"Current user ID: {current_user.id}")
-        logger.info(f"Current user email: {current_user.email}")
-        
         # Create task with explicit fields
         task = Task(
             title=task_data.title,
@@ -55,25 +60,28 @@ async def create_task(
             owner_id=current_user.id
         )
         
-        logger.info(f"Task object created: {task}")
-        logger.info(f"Adding task to database...")
+        print(f"DEBUG: Task object created: {task}", flush=True)
+        sys.stdout.flush()
+        
         db.add(task)
         
-        logger.info(f"Committing to database...")
+        print(f"DEBUG: About to commit", flush=True)
+        sys.stdout.flush()
+        
         await db.commit()
         
-        logger.info(f"Refreshing task from database...")
+        print(f"DEBUG: Commit successful", flush=True)
+        sys.stdout.flush()
+        
         await db.refresh(task)
         
-        logger.info(f"Task ID: {task.id}")
-        logger.info(f"===== TASK CREATED SUCCESSFULLY =====")
+        print(f"DEBUG: Task created: {task.id}", flush=True)
+        sys.stdout.flush()
+        
         return task
     except Exception as e:
-        logger.error(f"===== ERROR CREATING TASK =====")
-        logger.error(f"Error type: {type(e).__name__}")
-        logger.error(f"Error message: {str(e)}")
-        logger.error(f"Request data was: {task_data}")
-        logger.error(f"Current user: {current_user.id if current_user else 'None'}")
+        print(f"DEBUG ERROR: {type(e).__name__}: {e}", flush=True)
+        sys.stdout.flush()
         raise HTTPException(status_code=500, detail=str(e))
 
 
