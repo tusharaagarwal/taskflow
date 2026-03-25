@@ -26,10 +26,5 @@ Base = declarative_base()
 async def get_db():
     """Dependency for database session"""
     async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        except Exception as e:
-            logger.error(f"Database session error: {e}", exc_info=True)
-            raise
-        finally:
-            await session.close()
+        yield session
+        await session.close()
