@@ -1,9 +1,17 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import time
 from sqlalchemy.exc import SQLAlchemyError
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.database import engine, Base
@@ -15,15 +23,15 @@ from app.middleware.rate_limit import limiter, setup_middleware
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events"""
     # Startup
-    print("🚀 TaskFlow API starting...")
-    # Drop and recreate tables for fresh schema (development mode)
+    logger.info("🚀 TaskFlow API starting...")
+    # Drop and recreate tables for fresh schema
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-        print("✅ Database tables recreated")
+        logger.info("✅ Database tables recreated")
     yield
     # Shutdown
-    print("🛑 TaskFlow API shutting down...")
+    logger.info("🛑 TaskFlow API shutting down...")
     await engine.dispose()
 
 
@@ -51,12 +59,10 @@ app.add_middleware(
 # Global exception handler
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    import traceback
-    print(f"SQLAlchemy Error: {exc}")
-    print(f"Traceback: {traceback.format_exc()}")
+    logger.error(f"SQLAlchemy Error: {exc}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Database error occurred"},
+        content={"detail": f"Database error: {str(exc)}"},
     )
 
 

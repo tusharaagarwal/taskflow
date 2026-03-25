@@ -9,6 +9,7 @@ from app.routers.auth import get_current_user
 from app.models import User
 
 router = APIRouter(tags=["Tasks"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=List[TaskResponse])
@@ -20,12 +21,15 @@ async def list_tasks(
     db: AsyncSession = Depends(get_db),
 ):
     """List tasks for current user with optional status filter"""
+    logger.info(f"Listing tasks for user {current_user.id}")
     query = select(Task).where(Task.owner_id == current_user.id)
     if status_filter:
         query = query.where(Task.status == status_filter)
     query = query.offset(skip).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    tasks = result.scalars().all()
+    logger.info(f"Found {len(tasks)} tasks")
+    return tasks
 
 
 @router.post("/", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -36,7 +40,7 @@ async def create_task(
 ):
     """Create a new task"""
     try:
-        # Create task with explicit fields
+        logger.info(f"Creating task for user {current_user.id}: {task_data.title}")
         task = Task(
             title=task_data.title,
             description=task_data.description,
@@ -48,11 +52,10 @@ async def create_task(
         db.add(task)
         await db.commit()
         await db.refresh(task)
+        logger.info(f"Task created successfully: {task.id}")
         return task
     except Exception as e:
-        print(f"Error creating task: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error creating task: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
