@@ -40,7 +40,12 @@ async def create_task(
 ):
     """Create a new task"""
     try:
-        logger.info(f"Creating task for user {current_user.id}: {task_data.title}")
+        logger.info(f"===== CREATING TASK =====")
+        logger.info(f"Request data: {task_data}")
+        logger.info(f"Current user ID: {current_user.id}")
+        logger.info(f"Current user email: {current_user.email}")
+        
+        # Create task with explicit fields
         task = Task(
             title=task_data.title,
             description=task_data.description,
@@ -49,13 +54,26 @@ async def create_task(
             due_date=task_data.due_date,
             owner_id=current_user.id
         )
+        
+        logger.info(f"Task object created: {task}")
+        logger.info(f"Adding task to database...")
         db.add(task)
+        
+        logger.info(f"Committing to database...")
         await db.commit()
+        
+        logger.info(f"Refreshing task from database...")
         await db.refresh(task)
-        logger.info(f"Task created successfully: {task.id}")
+        
+        logger.info(f"Task ID: {task.id}")
+        logger.info(f"===== TASK CREATED SUCCESSFULLY =====")
         return task
     except Exception as e:
-        logger.error(f"Error creating task: {e}", exc_info=True)
+        logger.error(f"===== ERROR CREATING TASK =====")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Request data was: {task_data}")
+        logger.error(f"Current user: {current_user.id if current_user else 'None'}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
