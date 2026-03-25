@@ -3,14 +3,9 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import NullPool
 from app.config import settings
 
-# Async engine
+# Async engine - use Railway's DATABASE_URL as-is
 _db_url = settings.DATABASE_URL
-logger.info(f"Raw DATABASE_URL: {_db_url}")
-
-if _db_url.startswith("postgresql://"):
-    _db_url = _db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    
-logger.info(f"Final DATABASE_URL: {_db_url}")
+logger.info(f"DATABASE_URL: {_db_url}")
 
 engine = create_async_engine(
     _db_url,
