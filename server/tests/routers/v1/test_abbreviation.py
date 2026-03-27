@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 from fastapi import FastAPI
 from app.db.database import Base, get_db
+from app.models.application_runtime_config import ApplicationRuntimeConfig  # noqa: F401
 from app.routers.v1.abbreviation import router as abbreviation_router
 
 SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

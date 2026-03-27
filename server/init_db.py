@@ -1,5 +1,6 @@
 import asyncio
 from app.db.database import engine, Base
+from app.models.application_runtime_config import ApplicationRuntimeConfig  # noqa: F401
 
 async def init_models():
     async with engine.begin() as conn:

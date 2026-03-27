@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy import text
 import os
@@ -18,6 +18,10 @@ from app.models.content_product import ContentProduct
 from app.models.report_tracker import ReportTracker
 from app.models.workflow import Workflow
 from app.models.abbreviation import DocumentTypeAbbreviation
+from app.models.application_runtime_config import (
+    ApplicationRuntimeConfig,
+    RUNTIME_CONFIG_ROW_ID,
+)
 
 # Test database URL - using SQLite in-memory for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -92,7 +96,15 @@ async def engine():
     # Create all tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
+    async with async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=False
+    )() as seed_session:
+        seed_session.add(
+            ApplicationRuntimeConfig(id=RUNTIME_CONFIG_ROW_ID, data={})
+        )
+        await seed_session.commit()
+
     yield engine
     
     # Clean up

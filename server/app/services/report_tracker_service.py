@@ -13,6 +13,7 @@ from app.models.report_tracker import ReportTracker
 from app.models.content_product import ContentProduct
 from app.schemas.report_tracker import ReportTrackerCreateRequest
 from app.constants import WorkflowActionType
+from app.services.app_config_service import get_config_value
 from app.utils.security import sanitize_log_input
 
 logger = logging.getLogger(__name__)
@@ -81,18 +82,21 @@ class ReportTrackerService:
         s_content_type = sanitize_log_input(create_data.content_type)
         logger.debug(f"Fetching CPM record for lob={s_lob}, sub_lob={s_sub_lob}, content_type={s_content_type}")
         cpm_record = await CPMClientService.get_cpm_by_filters(
-            lob=create_data.lob,
-            sub_lob=create_data.sub_lob,
-            cp_name=create_data.content_type
+            db,
+            create_data.lob,
+            create_data.sub_lob,
+            create_data.content_type,
         )
         
-        # Extract workflow_id and cpm_id from CPM record
-        workflow_id = cpm_record.get("workflow_id")
+        # Extract workflow_id from CPM record; fall back to DB config then hardcoded default
+        cpm_workflow_id = cpm_record.get("workflow_id")
+        try:
+            workflow_id = int(cpm_workflow_id) if cpm_workflow_id is not None else None
+        except (ValueError, TypeError):
+            workflow_id = None
+        if workflow_id is None:
+            workflow_id = get_config_value("default_workflow_id", 1)
         cpm_id = cpm_record.get("id") or cpm_record.get("cpm_id")  # Try both keys
-        
-        if not workflow_id:
-            logger.error(f"No workflow_id in CPM record")
-            raise ValueError(f"No workflow_id in CPM record for lob={create_data.lob}, sub_lob={create_data.sub_lob}, content_type={create_data.content_type}")
         
         # Get the workflow JSON using the workflow_id (UUID)
         from app.services.workflow_service import WorkflowService

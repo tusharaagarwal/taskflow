@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from app.db.database import Base, get_db
 from app.main import app as main_app
+from app.models.application_runtime_config import ApplicationRuntimeConfig  # noqa: F401
 from app.models.workflow import Workflow
 
 # Ensure config base_path for tests

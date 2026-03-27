@@ -23,6 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock, MagicMock, patch
 from app.main import app as main_app
 from app.db.database import Base, get_db
+from app.models.application_runtime_config import ApplicationRuntimeConfig  # noqa: F401
 from app.models.content_product import ContentProduct
 from app.models.report_tracker import ReportTracker
 from app.routers.v1.report_tracker import router as report_tracker_router
@@ -184,7 +185,7 @@ config.base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 # Mock CPM + workflow service calls for create flow; disable messaging to avoid boto3/SNS/SQS timeouts (~30s+ per request)
 @pytest.fixture(autouse=True)
 def mock_cpm_and_workflow(monkeypatch):
-    async def mock_get_cpm_by_filters(lob: str, sub_lob: str, cp_name: str):
+    async def mock_get_cpm_by_filters(db, lob: str, sub_lob: str, cp_name: str):
         return {"workflow_id": 1}
 
     async def mock_get_workflow_json_from_workflow(db, workflow_id: int):

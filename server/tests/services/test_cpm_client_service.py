@@ -1,7 +1,10 @@
 """Test CPM client service"""
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import MagicMock, patch
+
 from app.services.cpm_client_service import CPMClientService
+
+_DB = MagicMock()
 
 
 class TestCPMClientService:
@@ -22,9 +25,10 @@ class TestCPMClientService:
         
         # Call the method
         result = await CPMClientService.get_cpm_by_filters(
+            _DB,
             lob="CORPORATE",
-            sub_lob="RATINGS", 
-            cp_name="Credit Opinion"
+            sub_lob="RATINGS",
+            cp_name="Credit Opinion",
         )
         
         # Assertions
@@ -43,9 +47,10 @@ class TestCPMClientService:
         # Call and assert exception
         with pytest.raises(ValueError, match="Mock CPM record not found"):
             await CPMClientService.get_cpm_by_filters(
+                _DB,
                 lob="INVALID",
                 sub_lob="INVALID",
-                cp_name="INVALID"
+                cp_name="INVALID",
             )
     
     @patch('app.config_settings.feature_flags.MOCK_CPM_API_USED', False)
@@ -54,9 +59,10 @@ class TestCPMClientService:
         # Call and assert exception
         with pytest.raises(NotImplementedError, match="Real CPM API not yet implemented"):
             await CPMClientService.get_cpm_by_filters(
+                _DB,
                 lob="CORPORATE",
                 sub_lob="RATINGS",
-                cp_name="Credit Opinion"
+                cp_name="Credit Opinion",
             )
     
     def test_get_cpm_by_filters_is_static_method(self):
@@ -76,9 +82,10 @@ class TestCPMClientService:
         with patch('app.services.cpm_client_service.logger') as mock_logger:
             # Call the method
             await CPMClientService.get_cpm_by_filters(
+                _DB,
                 lob="CORPORATE",
                 sub_lob="RATINGS",
-                cp_name="Credit Opinion"
+                cp_name="Credit Opinion",
             )
             
             # Check logging calls
@@ -101,9 +108,10 @@ class TestCPMClientService:
             # Call and assert exception
             with pytest.raises(ValueError):
                 await CPMClientService.get_cpm_by_filters(
+                    _DB,
                     lob="CORPORATE",
                     sub_lob="RATINGS",
-                    cp_name="Credit Opinion"
+                    cp_name="Credit Opinion",
                 )
             
             # Check error logging
@@ -118,9 +126,10 @@ class TestCPMClientService:
             # Call and assert exception
             with pytest.raises(NotImplementedError):
                 await CPMClientService.get_cpm_by_filters(
+                    _DB,
                     lob="CORPORATE",
                     sub_lob="RATINGS",
-                    cp_name="Credit Opinion"
+                    cp_name="Credit Opinion",
                 )
             
             # Check error logging

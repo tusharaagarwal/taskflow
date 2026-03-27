@@ -3,10 +3,8 @@ TEMP MOCK: CPM API Mock Router
 This file will be deleted when switching to the real CPM API.
 """
 import uuid
-from fastapi import APIRouter, HTTPException, Query
-from typing import Dict, Any
-
-from app.config_settings.feature_flags import DEFAULT_MOCK_WORKFLOW_ID
+from fastapi import APIRouter, Query
+from typing import Any, Dict
 
 router = APIRouter(prefix="/cpm", tags=["CPM Mock"])
 
@@ -29,11 +27,11 @@ def get_cpm_mock_data(lob: str, sub_lob: str, cp_name: str) -> Dict[str, Any]:
         cp_name: Content Product Name
         
     Returns:
-        Dictionary containing mock CPM record
+        Dictionary containing mock CPM record (``workflow_id`` is None;
+        caller resolves it via ``get_config_value``).
     """
-    # Use default workflow_id (integer)
-    workflow_id = DEFAULT_MOCK_WORKFLOW_ID
-    
+    workflow_id = None
+
     # Generate deterministic UUIDs
     cp_id = generate_deterministic_uuid(f"{lob}-{sub_lob}-{cp_name}")
     report_type_id = generate_deterministic_uuid(f"report_type-{cp_name}")
@@ -139,34 +137,31 @@ def get_cpm_mock_data(lob: str, sub_lob: str, cp_name: str) -> Dict[str, Any]:
 async def search_cpm(
     lob: str = Query(..., description="Line of Business"),
     sub_lob: str = Query(..., description="Sub Line of Business"),
-    cp_name: str = Query(..., description="Content Product Name")
+    cp_name: str = Query(..., description="Content Product Name"),
 ) -> Dict[str, Any]:
     """
     Search for a CPM record by LOB, sub-LOB, and content product name.
     Returns a single CPM record matching the filters.
+    ``workflow_id`` is None in mock data; caller resolves it via ``get_config_value``.
     """
     return get_cpm_mock_data(lob, sub_lob, cp_name)
 
 
 # TEMP MOCK: will be trashed later
 @router.get("/{cp_id}")
-async def get_cpm_detail(cp_id: str) -> Dict[str, Any]:
+async def get_cpm_detail(
+    cp_id: str,
+) -> Dict[str, Any]:
     """
     Get CPM record by CP ID.
     Returns mock data with the provided cp_id.
+    ``workflow_id`` is None; caller resolves it via ``get_config_value``.
     """
-    # For the detail endpoint, we'll return a default record
-    # but use the provided cp_id in the response
-    
-    # Use default workflow for detail endpoint
     default_lob = "banking"
     default_sub_lob = "figbanking"
     default_cp_name = "Credit Opinion"
-    
+
     mock_data = get_cpm_mock_data(default_lob, default_sub_lob, default_cp_name)
-    
-    # Override the cp_id with the one from the path
     mock_data["cp_id"] = cp_id
-    
     return mock_data
 

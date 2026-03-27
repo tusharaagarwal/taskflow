@@ -36,6 +36,7 @@ class TestCPMMockHelpers:
         assert "lob" in data
         assert "sub_lob" in data
         assert "workflow_id" in data
+        assert data["workflow_id"] is None  # workflow_id is resolved by caller via get_config_value
         assert "content_blocks" in data
         assert len(data["content_blocks"]) == 2
 
@@ -54,10 +55,11 @@ class TestCPMMockRouter:
 
     @pytest.fixture
     def client(self):
-        return TestClient(app)
+        with TestClient(app) as test_client:
+            yield test_client
 
     def test_search_cpm(self, client):
-        """Test CPM search endpoint."""
+        """Test CPM search endpoint returns mock data with workflow_id=None."""
         response = client.get(
             "/v1/cpm/search",
             params={
@@ -72,17 +74,19 @@ class TestCPMMockRouter:
         assert data["lob"] == "banking"
         assert data["sub_lob"] == "figbanking"
         assert data["cp_name"] == "Credit Opinion"
+        assert data["workflow_id"] is None  # resolved by caller
 
     def test_get_cpm_detail(self, client):
-        """Test CPM detail endpoint."""
+        """Test CPM detail endpoint returns mock data with workflow_id=None."""
         response = client.get("/v1/cpm/test-cp-id-123")
 
         assert response.status_code == 200
         data = response.json()
         assert data["cp_id"] == "test-cp-id-123"
+        assert data["workflow_id"] is None  # resolved by caller
 
     def test_search_cpm_missing_params(self, client):
-        """Test search with missing parameters."""
+        """Test search with missing parameters returns validation error."""
         response = client.get("/v1/cpm/search")
 
         assert response.status_code == 422  # Validation error

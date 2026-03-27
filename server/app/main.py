@@ -4,11 +4,13 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock, messaging, workflow
+from app.routers.v1 import abbreviation, report_tracker, root, cpm_mock, messaging, runtime_app_config, workflow
 from app.monitoring import health
 from app.logger import logger
 from app.middleware import RequestResponseMiddleware, SecurityHeadersMiddleware
 from app.config.config import settings
+from app.db.database import AsyncSessionLocal
+from app.services.runtime_app_config_service import RuntimeAppConfigService
 from app.services.sqs_consumer import sqs_consumer
 
 # Track application uptime
@@ -23,6 +25,14 @@ async def lifespan(app: FastAPI):
     started here when messaging_enabled is True.
     """
     logger.info("Application starting up", extra={"event": "startup"})
+
+    try:
+        async with AsyncSessionLocal() as session:
+            await RuntimeAppConfigService.ensure_singleton(session)
+            await session.commit()
+        logger.info("Application runtime config singleton row ensured")
+    except Exception as e:
+        logger.error("Failed to ensure application runtime config row: %s", e, exc_info=True)
 
     if settings.messaging_enabled:
         try:
@@ -73,6 +83,7 @@ app.include_router(abbreviation.router, prefix="/v1")
 app.include_router(report_tracker.router, prefix="/v1")
 app.include_router(cpm_mock.router, prefix="/v1")  # TEMP MOCK: CPM API
 app.include_router(messaging.router, prefix="/v1", tags=["messaging"])
+app.include_router(runtime_app_config.router, prefix="/v1")
 app.include_router(workflow.router, prefix="/api/v1")
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from app.db.database import Base
 # import models.entity_sub_sector  # noqa: F401
 # import app.models.primitive  # noqa: F401
 from app.models.report_tracker import ReportTracker  # noqa: F401
+from app.models.application_runtime_config import ApplicationRuntimeConfig  # noqa: F401
 from config_loader import config as app_config
 
 # this is the Alembic Config object, which provides
